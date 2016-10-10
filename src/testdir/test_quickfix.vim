@@ -818,6 +818,29 @@ function! Test_efm_dirstack()
   call delete('habits1.txt')
 endfunction
 
+" Test for resync after continuing an ignored message
+function! Xefm_ignore_continuations(cchar)
+  call s:setup_commands(a:cchar)
+
+  let save_efm = &efm
+
+  let &efm =
+	\ '%Eerror %m %l,' .
+	\ '%-Wignored %m %l,' .
+	\ '%+Cmore ignored %m %l,' .
+	\ '%Zignored end'
+  Xgetexpr ['ignored warning 1', 'more ignored continuation 2', 'ignored end', 'error resync 4']
+  let l = map(g:Xgetlist(), '[v:val.text, v:val.valid, v:val.lnum, v:val.type]')
+  call assert_equal([['resync', 1, 4, 'E']], l)
+
+  let &efm = save_efm
+endfunction
+
+function! Test_efm_ignore_continuations()
+  call Xefm_ignore_continuations('c')
+  call Xefm_ignore_continuations('l')
+endfunction
+
 " Tests for invalid error format specifies
 function Xinvalid_efm_Tests(cchar)
   call s:setup_commands(a:cchar)
@@ -1429,12 +1452,10 @@ function! Test_two_windows()
   laddexpr 'one.txt:3:one one one'
 
   let loc_one = getloclist(one_id)
-echo string(loc_one)
   call assert_equal('Xone/a/one.txt', bufname(loc_one[1].bufnr))
   call assert_equal(3, loc_one[1].lnum)
 
   let loc_two = getloclist(two_id)
-echo string(loc_two)
   call assert_equal('Xtwo/a/two.txt', bufname(loc_two[1].bufnr))
   call assert_equal(5, loc_two[1].lnum)
 
@@ -1534,6 +1555,11 @@ function Xproperty_tests(cchar)
     call assert_equal('N1', g:Xgetlist({'all':1}).title)
     call g:Xsetlist([], ' ', {'title' : 'N2'})
     call assert_equal(qfnr + 1, g:Xgetlist({'all':1}).nr)
+
+    let res = g:Xgetlist({'nr': 0})
+    call assert_equal(qfnr + 1, res.nr)
+    call assert_equal(['nr'], keys(res))
+
     call g:Xsetlist([], ' ', {'title' : 'N3'})
     call assert_equal('N2', g:Xgetlist({'nr':2, 'title':1}).title)
 
@@ -1546,7 +1572,7 @@ function Xproperty_tests(cchar)
     call assert_equal({}, g:Xgetlist({'abc':1}))
 
     if a:cchar == 'l'
-	call assert_equal({}, getloclist(99, ['title']))
+	call assert_equal({}, getloclist(99, {'title': 1}))
     endif
 endfunction
 
