@@ -29,10 +29,11 @@ Contents:
 10. Building with Perl support
 11. Building with Ruby support
 12. Building with Tcl support
-13. Windows 3.1
-14. MS-DOS
+13. Building with Terminal support
+14. Windows 3.1
+15. MS-DOS
 
-15. Installing after building from sources
+16. Installing after building from sources
 
 
 The currently preferred method is using the free Visual C++ Toolkit 2008
@@ -702,19 +703,35 @@ Or when using MinGW (as one line):
         TCL=C:\Tcl86 DYNAMIC_TCL=yes TCL_VER=86 TCL_VER_LONG=8.6
 
 
-13. Windows 3.1x
+13. Building with Terminal support
+==================================
+
+Vim with Terminal support can be built with either MSVC, MinGW or Cygwin.
+This uses the included libvterm and winpty.  No extra header files or
+libraries are needed for building.  Just set TERMINAL to yes.
+
+E.g. When using MSVC:
+
+    nmake -f Make_mvc.mak TERMINAL=yes
+
+Or when using MinGW (as one line):
+
+    mingw32-make -f Make_mingw.mak TERMINAL=yes
+
+
+14. Windows 3.1x
 ================
 
 The Windows 3.1x support was removed in patch 7.4.1364.
 
 
-14. MS-DOS
+15. MS-DOS
 ==========
 
 The MS-DOS support was removed in patch 7.4.1399.
 
 
-15. Installing after building from sources
+16. Installing after building from sources
 ==========================================
 
 [provided by Michael Soyka]
@@ -722,40 +739,40 @@ The MS-DOS support was removed in patch 7.4.1399.
 After you've built the Vim binaries as described above, you're ready to
 install Vim on your system.  However, if you've obtained the Vim sources
 using Git, Mercurial or by downloading them as a unix tar file, you must
-first create a "vim74" directory.  If you instead downloaded the sources as
+first create a "vim80" directory.  If you instead downloaded the sources as
 zip files, you can skip this setup as the zip archives already have the
 correct directory structure.
 
-  A.  Create a Vim "runtime" subdirectory named "vim74"
+  A.  Create a Vim "runtime" subdirectory named "vim80"
   -----------------------------------------------------
   If you obtained your Vim sources as zip files, you can skip this step.
   Otherwise, continue reading.
 
   Go to the directory that contains the Vim "src" and "runtime"
-  directories and create a new subdirectory named "vim74".
+  directories and create a new subdirectory named "vim80".
 
-  Copy the "runtime" files into "vim74":
-     copy runtime\* vim74
+  Copy the "runtime" files into "vim80":
+     copy runtime\* vim80
 
-  B.  Copy the new binaries into the "vim74" directory
+  B.  Copy the new binaries into the "vim80" directory
   ----------------------------------------------------
   Regardless of how you installed the Vim sources, you need to copy the
-  new binaries you created above into "vim74":
+  new binaries you created above into "vim80":
 
-     copy src\*.exe vim74
-     copy src\GvimExt\gvimext.dll vim74
-     copy src\xxd\xxd.exe vim74
+     copy src\*.exe vim80
+     copy src\GvimExt\gvimext.dll vim80
+     copy src\xxd\xxd.exe vim80
 
-  C.  Move the "vim74" directory into the Vim installation subdirectory
+  C.  Move the "vim80" directory into the Vim installation subdirectory
   ---------------------------------------------------------------------
-  Move the "vim74" subdirectory into the subdirectory where you want Vim
+  Move the "vim80" subdirectory into the subdirectory where you want Vim
   to be installed.  Typically, this subdirectory will be named "vim".
-  If you already have a "vim74" subdirectory in "vim", delete it first
+  If you already have a "vim80" subdirectory in "vim", delete it first
   by running its uninstal.exe program.
 
   D.  Install Vim
   ---------------
-  "cd" to your Vim installation subdirectory "vim\vim74" and run the
+  "cd" to your Vim installation subdirectory "vim\vim80" and run the
   "install.exe" program.  It will ask you a number of questions about
   how you would like to have your Vim setup.  Among these are:
   - You can tell it to write a "_vimrc" file with your preferences in the
