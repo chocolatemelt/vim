@@ -1312,6 +1312,7 @@ static digr_T digraphdefault[] =
 	{'/', '-', 0x2020},
 	{'/', '=', 0x2021},
 	{'.', '.', 0x2025},
+	{',', '.', 0x2026},
 	{'%', '0', 0x2030},
 	{'1', '\'', 0x2032},
 	{'2', '\'', 0x2033},
@@ -1875,6 +1876,13 @@ static digr_T digraphdefault[] =
 	{'f', 'l', 0xfb02},
 	{'f', 't', 0xfb05},
 	{'s', 't', 0xfb06},
+
+	/* extra alternatives, easier to remember */
+	{'W', '`', 0x1e80},
+	{'w', '`', 0x1e81},
+	{'Y', '`', 0x1ef2},
+	{'y', '`', 0x1ef3},
+
 #      endif /* FEAT_MBYTE */
 
 	/* Vim 5.x compatible digraphs that don't conflict with the above */

@@ -7,10 +7,10 @@ func! ListMonths()
   if g:setting != ''
     exe ":set" g:setting
   endif
-  let mth=copy(g:months)
+  let mth = copy(g:months)
   let entered = strcharpart(getline('.'),0,col('.'))
   if !empty(entered)
-    let mth=filter(mth, 'v:val=~"^".entered')
+    let mth = filter(mth, 'v:val=~"^".entered')
   endif
   call complete(1, mth) 
   return ''
@@ -378,7 +378,7 @@ func DummyCompleteFour(findstart, base)
   endif
 endfunc
 
-" Test that 'completefunc' works when it's OK.
+" Test that 'omnifunc' works when it's OK.
 func Test_omnifunc_with_check()
   new
   setlocal omnifunc=DummyCompleteFour
@@ -437,5 +437,194 @@ func Test_complete_no_undo()
   q!
 endfunc
 
+function! DummyCompleteFive(findstart, base)
+  if a:findstart
+    return 0
+  else
+    return [
+          \   { 'word': 'January', 'info': "info1-1\n1-2\n1-3" },
+          \   { 'word': 'February', 'info': "info2-1\n2-2\n2-3" },
+          \   { 'word': 'March', 'info': "info3-1\n3-2\n3-3" },
+          \   { 'word': 'April', 'info': "info4-1\n4-2\n4-3" },
+          \   { 'word': 'May', 'info': "info5-1\n5-2\n5-3" },
+          \ ]
+  endif
+endfunc
+
+" Test that 'completefunc' on Scratch buffer with preview window works when
+" it's OK.
+func Test_completefunc_with_scratch_buffer()
+  new +setlocal\ buftype=nofile\ bufhidden=wipe\ noswapfile
+  set completeopt+=preview
+  setlocal completefunc=DummyCompleteFive
+  call feedkeys("A\<C-X>\<C-U>\<C-N>\<C-N>\<C-N>\<Esc>", "x")
+  call assert_equal(['April'], getline(1, '$'))
+  pclose
+  q!
+  set completeopt&
+endfunc
+
+" <C-E> - select original typed text before the completion started without
+" auto-wrap text.
+func Test_completion_ctrl_e_without_autowrap()
+  new
+  let tw_save = &tw
+  set tw=78
+  let li = [
+        \ '"                                                        zzz',
+        \ '" zzzyyyyyyyyyyyyyyyyyyy']
+  call setline(1, li)
+  0
+  call feedkeys("A\<C-X>\<C-N>\<C-E>\<Esc>", "tx")
+  call assert_equal(li, getline(1, '$'))
+
+  let &tw = tw_save
+  q!
+endfunc
+
+function! DummyCompleteSix()
+  call complete(1, ['Hello', 'World'])
+  return ''
+endfunction
+
+" complete() correctly clears the list of autocomplete candidates
+" See #1411
+func Test_completion_clear_candidate_list()
+  new
+  %d
+  " select first entry from the completion popup
+  call feedkeys("a    xxx\<C-N>\<C-R>=DummyCompleteSix()\<CR>", "tx")
+  call assert_equal('Hello', getline(1))
+  %d
+  " select second entry from the completion popup
+  call feedkeys("a    xxx\<C-N>\<C-R>=DummyCompleteSix()\<CR>\<C-N>", "tx")
+  call assert_equal('World', getline(1))
+  %d
+  " select original text
+  call feedkeys("a    xxx\<C-N>\<C-R>=DummyCompleteSix()\<CR>\<C-N>\<C-N>", "tx")
+  call assert_equal('    xxx', getline(1))
+  %d
+  " back at first entry from completion list
+  call feedkeys("a    xxx\<C-N>\<C-R>=DummyCompleteSix()\<CR>\<C-N>\<C-N>\<C-N>", "tx")
+  call assert_equal('Hello', getline(1))
+
+  bw!
+endfunc
+
+func Test_completion_respect_bs_option()
+  new
+  let li = ["aaa", "aaa12345", "aaaabcdef", "aaaABC"]
+
+  set bs=indent,eol
+  call setline(1, li)
+  1
+  call feedkeys("A\<C-X>\<C-N>\<C-P>\<BS>\<BS>\<BS>\<Esc>", "tx")
+  call assert_equal('aaa', getline(1))
+
+  %d
+  set bs=indent,eol,start
+  call setline(1, li)
+  1
+  call feedkeys("A\<C-X>\<C-N>\<C-P>\<BS>\<BS>\<BS>\<Esc>", "tx")
+  call assert_equal('', getline(1))
+
+  bw!
+endfunc
+
+func CompleteUndo() abort
+  call complete(1, g:months)
+  return ''
+endfunc
+
+func Test_completion_can_undo()
+  inoremap <Right> <c-r>=CompleteUndo()<cr>
+  set completeopt+=noinsert,noselect
+
+  new
+  call feedkeys("a\<Right>a\<Esc>", 'xt')
+  call assert_equal('a', getline(1))
+  undo
+  call assert_equal('', getline(1))
+
+  bwipe!
+  set completeopt&
+  iunmap <Right>
+endfunc
+
+func Test_completion_comment_formatting()
+  new
+  setl formatoptions=tcqro
+  call feedkeys("o/*\<cr>\<cr>/\<esc>", 'tx')
+  call assert_equal(['', '/*', ' *', ' */'], getline(1,4))
+  %d
+  call feedkeys("o/*\<cr>foobar\<cr>/\<esc>", 'tx')
+  call assert_equal(['', '/*', ' * foobar', ' */'], getline(1,4))
+  %d
+  try
+    call feedkeys("o/*\<cr>\<cr>\<c-x>\<c-u>/\<esc>", 'tx')
+    call assert_report('completefunc not set, should have failed')
+  catch
+    call assert_exception('E764:')
+  endtry
+  call assert_equal(['', '/*', ' *', ' */'], getline(1,4))
+  bwipe!
+endfunc
+
+fun MessCompleteMonths()
+  for m in split("Jan Feb Mar Apr May Jun Jul Aug Sep")
+    call complete_add(m)
+    if complete_check()
+      break
+    endif
+  endfor
+  return []
+endfun
+
+fun MessCompleteMore()
+  call complete(1, split("Oct Nov Dec"))
+  return []
+endfun
+
+fun MessComplete(findstart, base)
+  if a:findstart
+    let line = getline('.')
+    let start = col('.') - 1
+    while start > 0 && line[start - 1] =~ '\a'
+      let start -= 1
+    endwhile
+    return start
+  else
+    call MessCompleteMonths()
+    call MessCompleteMore()
+    return []
+  endif
+endf
+
+func Test_complete_func_mess()
+  " Calling complete() after complete_add() in 'completefunc' is wrong, but it
+  " should not crash.
+  set completefunc=MessComplete
+  new
+  call setline(1, 'Ju')
+  call feedkeys("A\<c-x>\<c-u>/\<esc>", 'tx')
+  call assert_equal('Oct/Oct', getline(1))
+  bwipe!
+  set completefunc=
+endfunc
+
+func Test_complete_CTRLN_startofbuffer()
+  new
+  call setline(1, [ 'organize(cupboard, 3, 2);',
+        \ 'prioritize(bureau, 8, 7);',
+        \ 'realize(bannister, 4, 4);',
+        \ 'moralize(railing, 3,9);'])
+  let expected=['cupboard.organize(3, 2);',
+        \ 'bureau.prioritize(8, 7);',
+        \ 'bannister.realize(4, 4);',
+        \ 'railing.moralize(3,9);']
+  call feedkeys("qai\<c-n>\<c-n>.\<esc>3wdW\<cr>q3@a", 'tx')
+  call assert_equal(expected, getline(1,'$'))
+  bwipe!
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab
