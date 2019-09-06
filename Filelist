@@ -3,16 +3,17 @@
 
 # source files for all source archives
 SRC_ALL =	\
+		.gitignore \
 		.hgignore \
 		.lgtm.yml \
 		.travis.yml \
 		appveyor.yml \
+		ci/appveyor.bat \
 		src/Make_all.mak \
-		src/appveyor.bat \
-		src/README.txt \
+		src/README.md \
 		src/alloc.h \
 		src/arabic.c \
-		src/arabic.h \
+		src/arglist.c \
 		src/ascii.h \
 		src/autocmd.c \
 		src/beval.c \
@@ -20,16 +21,21 @@ SRC_ALL =	\
 		src/blob.c \
 		src/blowfish.c \
 		src/buffer.c \
+		src/change.c \
 		src/channel.c \
 		src/charset.c \
+		src/cmdexpand.c \
+		src/cmdhist.c \
 		src/crypt.c \
 		src/crypt_zip.c \
+		src/debugger.c \
 		src/dict.c \
 		src/diff.c \
 		src/digraph.c \
 		src/edit.c \
 		src/eval.c \
 		src/evalfunc.c \
+		src/evalvars.c \
 		src/ex_cmdidxs.h \
 		src/ex_cmds.c \
 		src/ex_cmds.h \
@@ -37,10 +43,10 @@ SRC_ALL =	\
 		src/ex_docmd.c \
 		src/ex_eval.c \
 		src/ex_getln.c \
-		src/farsi.c \
-		src/farsi.h \
 		src/feature.h \
 		src/fileio.c \
+		src/filepath.c \
+		src/findfile.c \
 		src/fold.c \
 		src/getchar.c \
 		src/globals.h \
@@ -49,6 +55,9 @@ SRC_ALL =	\
 		src/gui_beval.c \
 		src/hardcopy.c \
 		src/hashtab.c \
+		src/highlight.c \
+		src/indent.c \
+		src/insexpand.c \
 		src/json.c \
 		src/json_test.c \
 		src/kword_test.c \
@@ -56,6 +65,7 @@ SRC_ALL =	\
 		src/keymap.h \
 		src/macros.h \
 		src/main.c \
+		src/map.c \
 		src/mark.c \
 		src/mbyte.c \
 		src/memfile.c \
@@ -76,14 +86,19 @@ SRC_ALL =	\
 		src/option.c \
 		src/option.h \
 		src/popupmnu.c \
+		src/popupwin.c \
+		src/profiler.c \
 		src/quickfix.c \
 		src/regexp.c \
 		src/regexp_nfa.c \
 		src/regexp.h \
+		src/scriptfile.c \
 		src/screen.c \
 		src/search.c \
+		src/session.c \
 		src/sha256.c \
 		src/sign.c \
+		src/sound.c \
 		src/spell.c \
 		src/spell.h \
 		src/spellfile.c \
@@ -94,13 +109,16 @@ SRC_ALL =	\
 		src/terminal.c \
 		src/term.h \
 		src/termlib.c \
+		src/testing.c \
 		src/textprop.c \
 		src/ui.c \
 		src/undo.c \
+		src/usercmd.c \
 		src/userfunc.c \
 		src/version.c \
 		src/version.h \
 		src/vim.h \
+		src/viminfo.c \
 		src/winclip.c \
 		src/window.c \
 		src/tee/tee.c \
@@ -113,9 +131,12 @@ SRC_ALL =	\
 		src/testdir/lsan-suppress.txt \
 		src/testdir/sautest/autoload/*.vim \
 		src/testdir/runtest.vim \
+		src/testdir/summarize.vim \
+		src/testdir/check.vim \
 		src/testdir/shared.vim \
 		src/testdir/screendump.vim \
 		src/testdir/view_util.vim \
+		src/testdir/term_util.vim \
 		src/testdir/setup.vim \
 		src/testdir/gui_init.vim \
 		src/testdir/setup_gui.vim \
@@ -144,40 +165,53 @@ SRC_ALL =	\
 		src/testdir/samples/test000 \
 		src/testdir/if_ver*.vim \
 		src/testdir/color_ramp.vim \
+		src/testdir/silent.wav \
+		src/testdir/popupbounce.vim \
 		src/proto.h \
 		src/protodef.h \
 		src/proto/arabic.pro \
+		src/proto/arglist.pro \
 		src/proto/autocmd.pro \
 		src/proto/beval.pro \
 		src/proto/blob.pro \
 		src/proto/blowfish.pro \
 		src/proto/buffer.pro \
+		src/proto/change.pro \
 		src/proto/channel.pro \
 		src/proto/charset.pro \
+		src/proto/cmdexpand.pro \
+		src/proto/cmdhist.pro \
 		src/proto/crypt.pro \
 		src/proto/crypt_zip.pro \
+		src/proto/debugger.pro \
 		src/proto/dict.pro \
 		src/proto/diff.pro \
 		src/proto/digraph.pro \
 		src/proto/edit.pro \
 		src/proto/eval.pro \
 		src/proto/evalfunc.pro \
+		src/proto/evalvars.pro \
 		src/proto/ex_cmds.pro \
 		src/proto/ex_cmds2.pro \
 		src/proto/ex_docmd.pro \
 		src/proto/ex_eval.pro \
 		src/proto/ex_getln.pro \
-		src/proto/farsi.pro \
 		src/proto/fileio.pro \
+		src/proto/filepath.pro \
+		src/proto/findfile.pro \
 		src/proto/fold.pro \
 		src/proto/getchar.pro \
 		src/proto/gui.pro \
 		src/proto/gui_beval.pro \
 		src/proto/hardcopy.pro \
 		src/proto/hashtab.pro \
+		src/proto/highlight.pro \
+		src/proto/indent.pro \
+		src/proto/insexpand.pro \
 		src/proto/json.pro \
 		src/proto/list.pro \
 		src/proto/main.pro \
+		src/proto/map.pro \
 		src/proto/mark.pro \
 		src/proto/mbyte.pro \
 		src/proto/memfile.pro \
@@ -192,12 +226,17 @@ SRC_ALL =	\
 		src/proto/ops.pro \
 		src/proto/option.pro \
 		src/proto/popupmnu.pro \
+		src/proto/popupwin.pro \
+		src/proto/profiler.pro \
 		src/proto/quickfix.pro \
 		src/proto/regexp.pro \
+		src/proto/scriptfile.pro \
 		src/proto/screen.pro \
 		src/proto/search.pro \
+		src/proto/session.pro \
 		src/proto/sha256.pro \
 		src/proto/sign.pro \
+		src/proto/sound.pro \
 		src/proto/spell.pro \
 		src/proto/spellfile.pro \
 		src/proto/syntax.pro \
@@ -205,11 +244,14 @@ SRC_ALL =	\
 		src/proto/term.pro \
 		src/proto/terminal.pro \
 		src/proto/termlib.pro \
+		src/proto/testing.pro \
 		src/proto/textprop.pro \
 		src/proto/ui.pro \
 		src/proto/undo.pro \
+		src/proto/usercmd.pro \
 		src/proto/userfunc.pro \
 		src/proto/version.pro \
+		src/proto/viminfo.pro \
 		src/proto/winclip.pro \
 		src/proto/window.pro \
 		src/libvterm/.bzrignore \
@@ -414,11 +456,8 @@ SRC_DOS =	\
 		src/GvimExt/uninst.bat \
 		README_srcdos.txt \
 		src/INSTALLpc.txt \
-		src/Make_bc5.mak \
 		src/Make_cyg.mak \
 		src/Make_cyg_ming.mak \
-		src/Make_ivc.mak \
-		src/Make_dvc.mak \
 		src/Make_ming.mak \
 		src/Make_mvc.mak \
 		tools/rename.bat \
@@ -469,7 +508,6 @@ SRC_DOS =	\
 		src/xpm_w32.c \
 		src/xpm_w32.h \
 		src/tee/Make_mvc.mak \
-		src/xxd/Make_bc5.mak \
 		src/xxd/Make_ming.mak \
 		src/xxd/Make_mvc.mak \
 		nsis/gvim.nsi \
@@ -507,13 +545,14 @@ SRC_DOS_BIN =	\
 		src/vim.tlb \
 		src/xpm/COPYRIGHT \
 		src/xpm/README.txt \
+		src/xpm/arm64/lib-vc14/libXpm.lib \
 		src/xpm/include/*.h \
+		src/xpm/x64/lib-vc14/libXpm.lib \
 		src/xpm/x64/lib/libXpm.a \
 		src/xpm/x64/lib/libXpm.lib \
-		src/xpm/x64/lib-vc14/libXpm.lib \
+		src/xpm/x86/lib-vc14/libXpm.lib \
 		src/xpm/x86/lib/libXpm.a \
 		src/xpm/x86/lib/libXpm.lib \
-		src/xpm/x86/lib-vc14/libXpm.lib \
 		nsis/icons.zip \
 
 # source files for Amiga, DOS, etc. (also in the extra archive)
@@ -525,10 +564,7 @@ SRC_AMI =	\
 		README_amisrc.txt.info \
 		src.info \
 		src/INSTALLami.txt \
-		src/Make_dice.mak \
-		src/Make_manx.mak \
 		src/Make_morph.mak \
-		src/Make_sas.mak \
 		src/os_amiga.c \
 		src/os_amiga.h \
 		src/proto/os_amiga.pro \
@@ -662,6 +698,7 @@ RT_ALL =	\
 		runtime/pack/dist/opt/matchit/plugin/matchit.vim \
 		runtime/pack/dist/opt/matchit/doc/matchit.txt \
 		runtime/pack/dist/opt/matchit/doc/tags \
+		runtime/pack/dist/opt/matchit/autoload/*.vim \
 		runtime/pack/dist/opt/shellmenu/plugin/shellmenu.vim \
 		runtime/pack/dist/opt/swapmouse/plugin/swapmouse.vim \
 		runtime/pack/dist/opt/termdebug/plugin/termdebug.vim \
@@ -832,8 +869,6 @@ EXTRA =		\
 		$(SRC_EXTRA) \
 		README_extra.txt \
 		src/VisVim/VisVim.dll \
-		farsi/README.txt \
-		farsi/fonts/*/far-* \
 		runtime/vimlogo.xpm \
 		src/tee/Makefile \
 		src/tee/Make_mvc.mak \
@@ -936,6 +971,8 @@ LANG_SRC = \
 		src/po/Make_cyg.mak \
 		src/po/Make_ming.mak \
 		src/po/Make_mvc.mak \
+		src/po/vim.desktop.in \
+		src/po/gvim.desktop.in \
 		src/po/sjiscorr.c \
 		src/po/*.po \
 

@@ -35,6 +35,8 @@ static char_u	g_chartab[256];
 #define CT_ID_CHAR	0x20	/* flag: set for ID chars */
 #define CT_FNAME_CHAR	0x40	/* flag: set for file name chars */
 
+static int in_win_border(win_T *wp, colnr_T vcol);
+
 /*
  * Fill g_chartab[].  Also fills curbuf->b_chartab[] with flags for keyword
  * characters for current buffer.
@@ -98,13 +100,6 @@ buf_init_chartab(
 	while (c <= '~')
 #endif
 	    g_chartab[c++] = 1 + CT_PRINT_CHAR;
-#ifdef FEAT_FKMAP
-	if (p_altkeymap)
-	{
-	    while (c < YE)
-		g_chartab[c++] = 1 + CT_PRINT_CHAR;
-	}
-#endif
 	while (c < 256)
 	{
 	    /* UTF-8: bytes 0xa0 - 0xff are printable (latin1) */
@@ -218,11 +213,7 @@ buf_init_chartab(
 		/* Use the MB_ functions here, because isalpha() doesn't
 		 * work properly when 'encoding' is "latin1" and the locale is
 		 * "C".  */
-		if (!do_isalpha || MB_ISLOWER(c) || MB_ISUPPER(c)
-#ifdef FEAT_FKMAP
-			|| (p_altkeymap && (F_isalpha(c) || F_isdigit(c)))
-#endif
-			    )
+		if (!do_isalpha || MB_ISLOWER(c) || MB_ISUPPER(c))
 		{
 		    if (i == 0)			/* (re)set ID flag */
 		    {
@@ -236,10 +227,6 @@ buf_init_chartab(
 			if ((c < ' '
 #ifndef EBCDIC
 				    || c > '~'
-#endif
-#ifdef FEAT_FKMAP
-				    || (p_altkeymap
-					&& (F_isalpha(c) || F_isdigit(c)))
 #endif
 				// For double-byte we keep the cell width, so
 				// that we can detect it from the first byte.
@@ -327,8 +314,6 @@ trans_characters(
     }
 }
 
-#if defined(FEAT_EVAL) || defined(FEAT_TITLE) || defined(FEAT_INS_EXPAND) \
-	|| defined(PROTO)
 /*
  * Translate a string into allocated memory, replacing special chars with
  * printable chars.  Returns NULL when out of memory.
@@ -370,10 +355,10 @@ transstr(char_u *s)
 		    len += 4;	/* illegal byte sequence */
 	    }
 	}
-	res = alloc((unsigned)(len + 1));
+	res = alloc(len + 1);
     }
     else
-	res = alloc((unsigned)(vim_strsize(s) + 1));
+	res = alloc(vim_strsize(s) + 1);
     if (res != NULL)
     {
 	*res = NUL;
@@ -395,9 +380,7 @@ transstr(char_u *s)
     }
     return res;
 }
-#endif
 
-#if defined(FEAT_SYN_HL) || defined(FEAT_INS_EXPAND) || defined(PROTO)
 /*
  * Convert the string "str[orglen]" to do ignore-case comparing.  Uses the
  * current locale.
@@ -508,7 +491,6 @@ str_foldcase(
 	return (char_u *)ga.ga_data;
     return buf;
 }
-#endif
 
 /*
  * Catch 22: g_chartab[] can't be initialized before the options are
@@ -539,9 +521,6 @@ transchar(int c)
 		    (c >= 64 && c < 255)
 #else
 		    (c >= ' ' && c <= '~')
-#endif
-#ifdef FEAT_FKMAP
-			|| (p_altkeymap && F_ischar(c))
 #endif
 		)) || (c < 256 && vim_isprintc_strict(c)))
     {
@@ -1073,7 +1052,6 @@ win_lbr_chartabsize(
 	    if (col2 >= colmax)		/* doesn't fit */
 	    {
 		size = colmax - col + col_adj;
-		tab_corr = FALSE;
 		break;
 	    }
 	}
@@ -1124,14 +1102,16 @@ win_lbr_chartabsize(
 	    {
 		if (size + sbrlen + numberwidth > (colnr_T)wp->w_width)
 		{
-		    /* calculate effective window width */
+		    // calculate effective window width
 		    int width = (colnr_T)wp->w_width - sbrlen - numberwidth;
-		    int prev_width = col ? ((colnr_T)wp->w_width - (sbrlen + col)) : 0;
-		    if (width == 0)
-			width = (colnr_T)wp->w_width;
+		    int prev_width = col
+				 ? ((colnr_T)wp->w_width - (sbrlen + col)) : 0;
+
+		    if (width <= 0)
+			width = (colnr_T)1;
 		    added += ((size - prev_width) / width) * vim_strsize(p_sbr);
 		    if ((size - prev_width) % width)
-			/* wrapped, add another length of 'sbr' */
+			// wrapped, add another length of 'sbr'
 			added += vim_strsize(p_sbr);
 		}
 		else
@@ -1191,7 +1171,7 @@ win_nolbr_chartabsize(
  * Return TRUE if virtual column "vcol" is in the rightmost column of window
  * "wp".
  */
-    int
+    static int
 in_win_border(win_T *wp, colnr_T vcol)
 {
     int		width1;		/* width of first line (after line number) */
@@ -1794,24 +1774,29 @@ vim_isblankline(char_u *lbuf)
  * If "what" contains STR2NR_HEX recognize hex numbers
  * If "what" contains STR2NR_FORCE always assume bin/oct/hex.
  * If maxlen > 0, check at a maximum maxlen chars.
+ * If strict is TRUE, check the number strictly. return *len = 0 if fail.
  */
     void
 vim_str2nr(
     char_u		*start,
-    int			*prep,	    /* return: type of number 0 = decimal, 'x'
-				       or 'X' is hex, '0' = octal, 'b' or 'B'
-				       is bin */
-    int			*len,	    /* return: detected length of number */
-    int			what,	    /* what numbers to recognize */
-    varnumber_T		*nptr,	    /* return: signed result */
-    uvarnumber_T	*unptr,	    /* return: unsigned result */
-    int			maxlen)     /* max length of string to check */
+    int			*prep,	    // return: type of number 0 = decimal, 'x'
+				    // or 'X' is hex, '0' = octal, 'b' or 'B'
+				    // is bin
+    int			*len,	    // return: detected length of number
+    int			what,	    // what numbers to recognize
+    varnumber_T		*nptr,	    // return: signed result
+    uvarnumber_T	*unptr,	    // return: unsigned result
+    int			maxlen,     // max length of string to check
+    int			strict)     // check strictly
 {
     char_u	    *ptr = start;
-    int		    pre = 0;		/* default is decimal */
+    int		    pre = 0;		// default is decimal
     int		    negative = FALSE;
     uvarnumber_T    un = 0;
     int		    n;
+
+    if (len != NULL)
+	*len = 0;
 
     if (ptr[0] == '-')
     {
@@ -1854,9 +1839,7 @@ vim_str2nr(
 	}
     }
 
-    /*
-    * Do the string-to-numeric conversion "manually" to avoid sscanf quirks.
-    */
+    // Do the conversion manually to avoid sscanf() quirks.
     n = 1;
     if (pre == 'B' || pre == 'b' || what == STR2NR_BIN + STR2NR_FORCE)
     {
@@ -1925,6 +1908,10 @@ vim_str2nr(
 		break;
 	}
     }
+    // Check for an alpha-numeric character immediately following, that is
+    // most likely a typo.
+    if (strict && n - 1 != maxlen && ASCII_ISALNUM(*ptr))
+	return;
 
     if (prep != NULL)
 	*prep = pre;
@@ -1981,7 +1968,7 @@ hexhex2nr(char_u *p)
 
 /*
  * Return TRUE if "str" starts with a backslash that should be removed.
- * For MS-DOS, WIN32 and OS/2 this is only done when the character after the
+ * For MS-DOS, MSWIN and OS/2 this is only done when the character after the
  * backslash is not a normal file name character.
  * '$' is a valid file name character, we don't remove the backslash before
  * it.  This means it is not possible to use an environment variable after a
@@ -2023,6 +2010,7 @@ backslash_halve(char_u *p)
 
 /*
  * backslash_halve() plus save the result in allocated memory.
+ * However, returns "p" when out of memory.
  */
     char_u *
 backslash_halve_save(char_u *p)

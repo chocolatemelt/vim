@@ -28,6 +28,7 @@ static void t_puts(int *t_col, char_u *t_s, char_u *s, int attr);
 static void msg_puts_printf(char_u *str, int maxlen);
 static int do_more_prompt(int typed_char);
 static void msg_screen_putchar(int c, int attr);
+static void msg_moremsg(int full);
 static int  msg_check_screen(void);
 static void redir_write(char_u *s, int maxlen);
 #ifdef FEAT_CON_DIALOG
@@ -35,6 +36,7 @@ static char_u *msg_show_console_dialog(char_u *message, char_u *buttons, int dfl
 static int	confirm_msg_used = FALSE;	/* displaying confirm_msg */
 static char_u	*confirm_msg = NULL;		/* ":confirm" message */
 static char_u	*confirm_msg_tail;		/* tail of confirm_msg */
+static void display_confirm_msg(void);
 #endif
 #ifdef FEAT_JOB_CHANNEL
 static int emsg_to_channel_log = FALSE;
@@ -101,8 +103,6 @@ msg(char *s)
     return msg_attr_keep(s, 0, FALSE);
 }
 
-#if defined(FEAT_EVAL) || defined(FEAT_X11) || defined(USE_XSMP) \
-    || defined(FEAT_GUI_GTK) || defined(PROTO)
 /*
  * Like msg() but keep it silent when 'verbosefile' is set.
  */
@@ -117,7 +117,6 @@ verb_msg(char *s)
 
     return n;
 }
-#endif
 
     int
 msg_attr(char *s, int attr)
@@ -360,9 +359,6 @@ trunc_string(
 int vim_snprintf(char *str, size_t str_m, const char *fmt, ...);
 
     int
-# ifdef __BORLANDC__
-_RTLENTRYF
-# endif
 smsg(const char *s, ...)
 {
     va_list arglist;
@@ -374,9 +370,6 @@ smsg(const char *s, ...)
 }
 
     int
-# ifdef __BORLANDC__
-_RTLENTRYF
-# endif
 smsg_attr(int attr, const char *s, ...)
 {
     va_list arglist;
@@ -388,9 +381,6 @@ smsg_attr(int attr, const char *s, ...)
 }
 
     int
-# ifdef __BORLANDC__
-_RTLENTRYF
-# endif
 smsg_attr_keep(int attr, const char *s, ...)
 {
     va_list arglist;
@@ -449,7 +439,7 @@ get_emsg_source(void)
     if (sourcing_name != NULL && other_sourcing_name())
     {
 	p = (char_u *)_("Error detected while processing %s:");
-	Buf = alloc((unsigned)(STRLEN(sourcing_name) + STRLEN(p)));
+	Buf = alloc(STRLEN(sourcing_name) + STRLEN(p));
 	if (Buf != NULL)
 	    sprintf((char *)Buf, (char *)p, sourcing_name);
 	return Buf;
@@ -474,7 +464,7 @@ get_emsg_lnum(void)
 	    && sourcing_lnum != 0)
     {
 	p = (char_u *)_("line %4ld:");
-	Buf = alloc((unsigned)(STRLEN(p) + 20));
+	Buf = alloc(STRLEN(p) + 20);
 	if (Buf != NULL)
 	    sprintf((char *)Buf, (char *)p, (long)sourcing_lnum);
 	return Buf;
@@ -525,7 +515,7 @@ msg_source(int attr)
  * If "msg" is in 'debug': do error message but without side effects.
  * If "emsg_skip" is set: never do error messages.
  */
-    int
+    static int
 emsg_not_now(void)
 {
     if ((emsg_off > 0 && vim_strchr(p_debug, 'm') == NULL
@@ -664,7 +654,7 @@ emsg_core(char_u *s)
 		redir_write(s, -1);
 	    }
 #ifdef FEAT_JOB_CHANNEL
-	    ch_log(NULL, "ERROR: %s", (char *)s);
+	    ch_log(NULL, "ERROR silent: %s", (char *)s);
 #endif
 	    return TRUE;
 	}
@@ -730,6 +720,7 @@ emsg(char *s)
     return TRUE;		/* no error messages at the moment */
 }
 
+#ifndef PROTO  // manual proto with __attribute__
 /*
  * Print an error message with format string and variable arguments.
  * Note: caller must not pass 'IObuff' as 1st argument.
@@ -749,6 +740,7 @@ semsg(const char *s, ...)
     }
     return TRUE;		/* no error messages at the moment */
 }
+#endif
 
 /*
  * Same as emsg(...), but abort on error when ABORT_ON_INTERNAL_ERROR is
@@ -765,6 +757,7 @@ iemsg(char *s)
 #endif
 }
 
+#ifndef PROTO  // manual proto with __attribute__
 /*
  * Same as semsg(...) but abort on error when ABORT_ON_INTERNAL_ERROR is
  * defined. It is used for internal errors only, so that they can be
@@ -783,10 +776,11 @@ siemsg(const char *s, ...)
 	va_end(ap);
 	emsg_core(IObuff);
     }
-#ifdef ABORT_ON_INTERNAL_ERROR
+# ifdef ABORT_ON_INTERNAL_ERROR
     abort();
-#endif
+# endif
 }
+#endif
 
 /*
  * Give an "Internal error" message.
@@ -883,7 +877,7 @@ add_msg_hist(
 	(void)delete_first_msg();
 
     /* allocate an entry and add the message at the end of the history */
-    p = (struct msg_hist *)alloc((int)sizeof(struct msg_hist));
+    p = ALLOC_ONE(struct msg_hist);
     if (p != NULL)
     {
 	if (len < 0)
@@ -1590,7 +1584,8 @@ msg_make(char_u *arg)
     int
 msg_outtrans_special(
     char_u	*strstart,
-    int		from)	/* TRUE for lhs of a mapping */
+    int		from,	// TRUE for lhs of a mapping
+    int		maxlen) // screen columns, 0 for unlimeted
 {
     char_u	*str = strstart;
     int		retval = 0;
@@ -1610,6 +1605,8 @@ msg_outtrans_special(
 	else
 	    text = (char *)str2special(&str, from);
 	len = vim_strsize((char_u *)text);
+	if (maxlen > 0 && retval + len >= maxlen)
+	    break;
 	/* Highlight special keys */
 	msg_puts_attr(text, len > 1
 		&& (*mb_ptr2len)((char_u *)text) <= 1 ? attr : 0);
@@ -1935,13 +1932,7 @@ msg_puts_title(char *s)
  * part in the middle and replace it with "..." when necessary.
  * Does not handle multi-byte characters!
  */
-    void
-msg_outtrans_long_attr(char_u *longstr, int attr)
-{
-    msg_outtrans_long_len_attr(longstr, (int)STRLEN(longstr), attr);
-}
-
-    void
+    static void
 msg_outtrans_long_len_attr(char_u *longstr, int len, int attr)
 {
     int		slen = len;
@@ -1955,6 +1946,12 @@ msg_outtrans_long_len_attr(char_u *longstr, int len, int attr)
 	msg_puts_attr("...", HL_ATTR(HLF_8));
     }
     msg_outtrans_len_attr(longstr + len - slen, slen, attr);
+}
+
+    void
+msg_outtrans_long_attr(char_u *longstr, int attr)
+{
+    msg_outtrans_long_len_attr(longstr, (int)STRLEN(longstr), attr);
 }
 
 /*
@@ -2365,7 +2362,7 @@ store_sb_text(
 
     if (s > *sb_str)
     {
-	mp = (msgchunk_T *)alloc((int)(sizeof(msgchunk_T) + (s - *sb_str)));
+	mp = alloc(sizeof(msgchunk_T) + (s - *sb_str));
 	if (mp != NULL)
 	{
 	    mp->sb_eol = finish;
@@ -2556,8 +2553,12 @@ t_puts(
 msg_use_printf(void)
 {
     return (!msg_check_screen()
-#if defined(WIN3264) && !defined(FEAT_GUI_MSWIN)
+#if defined(MSWIN) && (!defined(FEAT_GUI_MSWIN) || defined(VIMDLL))
+# ifdef VIMDLL
+	    || (!gui.in_use && !termcap_active)
+# else
 	    || !termcap_active
+# endif
 #endif
 	    || (swapping_screen() && !termcap_active)
 	       );
@@ -2570,57 +2571,45 @@ msg_use_printf(void)
 msg_puts_printf(char_u *str, int maxlen)
 {
     char_u	*s = str;
-    char_u	buf[4];
-    char_u	*p;
-#ifdef WIN3264
-# if !defined(FEAT_GUI_MSWIN)
-    char_u	*ccp = NULL;
+    char_u	*buf = NULL;
+    char_u	*p = s;
 
-# endif
+#ifdef MSWIN
     if (!(silent_mode && p_verbose == 0))
-	mch_settmode(TMODE_COOK);	/* handle '\r' and '\n' correctly */
-
-# if !defined(FEAT_GUI_MSWIN)
-    if (enc_codepage >= 0 && (int)GetConsoleCP() != enc_codepage)
-    {
-	int	inlen = (int)STRLEN(str);
-	int	outlen;
-	WCHAR	*widestr = (WCHAR *)enc_to_utf16(str, &inlen);
-
-	if (widestr != NULL)
-	{
-	    WideCharToMultiByte_alloc(GetConsoleCP(), 0, widestr, inlen,
-						 (LPSTR *)&ccp, &outlen, 0, 0);
-	    vim_free(widestr);
-	    s = str = ccp;
-	}
-    }
-# endif
+	mch_settmode(TMODE_COOK);	/* handle CR and NL correctly */
 #endif
     while ((maxlen < 0 || (int)(s - str) < maxlen) && *s != NUL)
     {
 	if (!(silent_mode && p_verbose == 0))
 	{
-	    /* NL --> CR NL translation (for Unix, not for "--version") */
-	    p = &buf[0];
-	    if (*s == '\n' && !info_message)
-		*p++ = '\r';
-#if defined(USE_CR)
-	    else
-#endif
-		*p++ = *s;
-	    *p = '\0';
-	    if (info_message)	/* informative message, not an error */
-		mch_msg((char *)buf);
-	    else
-		mch_errmsg((char *)buf);
+	    // NL --> CR NL translation (for Unix, not for "--version")
+	    if (*s == NL)
+	    {
+		int n = (int)(s - p);
+
+		buf = alloc(n + 3);
+		if (buf != NULL)
+		{
+		    memcpy(buf, p, n);
+		    if (!info_message)
+			buf[n++] = CAR;
+		    buf[n++] = NL;
+		    buf[n++] = NUL;
+		    if (info_message)   // informative message, not an error
+			mch_msg((char *)buf);
+		    else
+			mch_errmsg((char *)buf);
+		    vim_free(buf);
+		}
+		p = s + 1;
+	    }
 	}
 
-	/* primitive way to compute the current column */
+	// primitive way to compute the current column
 #ifdef FEAT_RIGHTLEFT
 	if (cmdmsg_rl)
 	{
-	    if (*s == '\r' || *s == '\n')
+	    if (*s == CAR || *s == NL)
 		msg_col = Columns - 1;
 	    else
 		--msg_col;
@@ -2628,19 +2617,34 @@ msg_puts_printf(char_u *str, int maxlen)
 	else
 #endif
 	{
-	    if (*s == '\r' || *s == '\n')
+	    if (*s == CAR || *s == NL)
 		msg_col = 0;
 	    else
 		++msg_col;
 	}
 	++s;
     }
-    msg_didout = TRUE;	    /* assume that line is not empty */
 
-#ifdef WIN3264
-# if !defined(FEAT_GUI_MSWIN)
-    vim_free(ccp);
-# endif
+    if (*p != NUL && !(silent_mode && p_verbose == 0))
+    {
+	int c = -1;
+
+	if (maxlen > 0 && STRLEN(p) > (size_t)maxlen)
+	{
+	    c = p[maxlen];
+	    p[maxlen] = 0;
+	}
+	if (info_message)
+	    mch_msg((char *)p);
+	else
+	    mch_errmsg((char *)p);
+	if (c != -1)
+	    p[maxlen] = c;
+    }
+
+    msg_didout = TRUE;	    // assume that line is not empty
+
+#ifdef MSWIN
     if (!(silent_mode && p_verbose == 0))
 	mch_settmode(TMODE_RAW);
 #endif
@@ -2933,6 +2937,30 @@ do_more_prompt(int typed_char)
 # undef mch_msg
 #endif
 
+#if defined(MSWIN) && (!defined(FEAT_GUI_MSWIN) || defined(VIMDLL))
+    static void
+mch_errmsg_c(char *str)
+{
+    int	    len = (int)STRLEN(str);
+    DWORD   nwrite = 0;
+    DWORD   mode = 0;
+    HANDLE  h = GetStdHandle(STD_ERROR_HANDLE);
+
+    if (GetConsoleMode(h, &mode) && enc_codepage >= 0
+	    && (int)GetConsoleCP() != enc_codepage)
+    {
+	WCHAR	*w = enc_to_utf16((char_u *)str, &len);
+
+	WriteConsoleW(h, w, len, &nwrite, NULL);
+	vim_free(w);
+    }
+    else
+    {
+	fprintf(stderr, "%s", str);
+    }
+}
+#endif
+
 /*
  * Give an error message.  To be used when the screen hasn't been initialized
  * yet.  When stderr can't be used, collect error messages until the GUI has
@@ -2941,9 +2969,11 @@ do_more_prompt(int typed_char)
     void
 mch_errmsg(char *str)
 {
+#if !defined(MSWIN) || defined(FEAT_GUI_MSWIN)
     int		len;
+#endif
 
-#if (defined(UNIX) || defined(FEAT_GUI)) && !defined(ALWAYS_USE_GUI)
+#if (defined(UNIX) || defined(FEAT_GUI)) && !defined(ALWAYS_USE_GUI) && !defined(VIMDLL)
     /* On Unix use stderr if it's a tty.
      * When not going to start the GUI also use stderr.
      * On Mac, when started from Finder, stderr is the console. */
@@ -2968,6 +2998,17 @@ mch_errmsg(char *str)
     }
 #endif
 
+#if defined(MSWIN) && (!defined(FEAT_GUI_MSWIN) || defined(VIMDLL))
+# ifdef VIMDLL
+    if (!(gui.in_use || gui.starting))
+# endif
+    {
+	mch_errmsg_c(str);
+	return;
+    }
+#endif
+
+#if !defined(MSWIN) || defined(FEAT_GUI_MSWIN)
     /* avoid a delay for a message that isn't there */
     emsg_on_display = FALSE;
 
@@ -2981,7 +3022,7 @@ mch_errmsg(char *str)
     {
 	mch_memmove((char_u *)error_ga.ga_data + error_ga.ga_len,
 							  (char_u *)str, len);
-#ifdef UNIX
+# ifdef UNIX
 	/* remove CR characters, they are displayed */
 	{
 	    char_u	*p;
@@ -2995,11 +3036,37 @@ mch_errmsg(char *str)
 		*p = ' ';
 	    }
 	}
-#endif
+# endif
 	--len;		/* don't count the NUL at the end */
 	error_ga.ga_len += len;
     }
+#endif
 }
+
+#if defined(MSWIN) && (!defined(FEAT_GUI_MSWIN) || defined(VIMDLL))
+    static void
+mch_msg_c(char *str)
+{
+    int	    len = (int)STRLEN(str);
+    DWORD   nwrite = 0;
+    DWORD   mode;
+    HANDLE  h = GetStdHandle(STD_OUTPUT_HANDLE);
+
+
+    if (GetConsoleMode(h, &mode) && enc_codepage >= 0
+	    && (int)GetConsoleCP() != enc_codepage)
+    {
+	WCHAR	*w = enc_to_utf16((char_u *)str, &len);
+
+	WriteConsoleW(h, w, len, &nwrite, NULL);
+	vim_free(w);
+    }
+    else
+    {
+	printf("%s", str);
+    }
+}
+#endif
 
 /*
  * Give a message.  To be used when the screen hasn't been initialized yet.
@@ -3009,32 +3076,44 @@ mch_errmsg(char *str)
     void
 mch_msg(char *str)
 {
-#if (defined(UNIX) || defined(FEAT_GUI)) && !defined(ALWAYS_USE_GUI)
+#if (defined(UNIX) || defined(FEAT_GUI)) && !defined(ALWAYS_USE_GUI) && !defined(VIMDLL)
     /* On Unix use stdout if we have a tty.  This allows "vim -h | more" and
      * uses mch_errmsg() when started from the desktop.
      * When not going to start the GUI also use stdout.
      * On Mac, when started from Finder, stderr is the console. */
     if (
-#  ifdef UNIX
-#   ifdef MACOS_X
+# ifdef UNIX
+#  ifdef MACOS_X
 	    (isatty(2) && strcmp("/dev/console", ttyname(2)) != 0)
-#   else
+#  else
 	    isatty(2)
-#    endif
-#   ifdef FEAT_GUI
-	    ||
-#   endif
 #  endif
 #  ifdef FEAT_GUI
-	    !(gui.in_use || gui.starting)
+	    ||
 #  endif
+# endif
+# ifdef FEAT_GUI
+	    !(gui.in_use || gui.starting)
+# endif
 	    )
     {
 	printf("%s", str);
 	return;
     }
+#endif
+
+#if defined(MSWIN) && (!defined(FEAT_GUI_MSWIN) || defined(VIMDLL))
+# ifdef VIMDLL
+    if (!(gui.in_use || gui.starting))
 # endif
+    {
+	mch_msg_c(str);
+	return;
+    }
+#endif
+#if !defined(MSWIN) || defined(FEAT_GUI_MSWIN)
     mch_errmsg(str);
+#endif
 }
 #endif /* USE_MCH_ERRMSG */
 
@@ -3067,7 +3146,7 @@ msg_screen_putchar(int c, int attr)
     }
 }
 
-    void
+    static void
 msg_moremsg(int full)
 {
     int		attr;
@@ -3808,7 +3887,7 @@ msg_show_console_dialog(
 /*
  * Display the ":confirm" message.  Also called when screen resized.
  */
-    void
+    static void
 display_confirm_msg(void)
 {
     /* avoid that 'q' at the more prompt truncates the message here */
@@ -3877,168 +3956,6 @@ vim_dialog_yesnoallcancel(
 }
 
 #endif /* FEAT_GUI_DIALOG || FEAT_CON_DIALOG */
-
-#if defined(FEAT_BROWSE) || defined(PROTO)
-/*
- * Generic browse function.  Calls gui_mch_browse() when possible.
- * Later this may pop-up a non-GUI file selector (external command?).
- */
-    char_u *
-do_browse(
-    int		flags,		/* BROWSE_SAVE and BROWSE_DIR */
-    char_u	*title,		/* title for the window */
-    char_u	*dflt,		/* default file name (may include directory) */
-    char_u	*ext,		/* extension added */
-    char_u	*initdir,	/* initial directory, NULL for current dir or
-				   when using path from "dflt" */
-    char_u	*filter,	/* file name filter */
-    buf_T	*buf)		/* buffer to read/write for */
-{
-    char_u		*fname;
-    static char_u	*last_dir = NULL;    /* last used directory */
-    char_u		*tofree = NULL;
-    int			save_browse = cmdmod.browse;
-
-    /* Must turn off browse to avoid that autocommands will get the
-     * flag too!  */
-    cmdmod.browse = FALSE;
-
-    if (title == NULL || *title == NUL)
-    {
-	if (flags & BROWSE_DIR)
-	    title = (char_u *)_("Select Directory dialog");
-	else if (flags & BROWSE_SAVE)
-	    title = (char_u *)_("Save File dialog");
-	else
-	    title = (char_u *)_("Open File dialog");
-    }
-
-    /* When no directory specified, use default file name, default dir, buffer
-     * dir, last dir or current dir */
-    if ((initdir == NULL || *initdir == NUL) && dflt != NULL && *dflt != NUL)
-    {
-	if (mch_isdir(dflt))		/* default file name is a directory */
-	{
-	    initdir = dflt;
-	    dflt = NULL;
-	}
-	else if (gettail(dflt) != dflt)	/* default file name includes a path */
-	{
-	    tofree = vim_strsave(dflt);
-	    if (tofree != NULL)
-	    {
-		initdir = tofree;
-		*gettail(initdir) = NUL;
-		dflt = gettail(dflt);
-	    }
-	}
-    }
-
-    if (initdir == NULL || *initdir == NUL)
-    {
-	/* When 'browsedir' is a directory, use it */
-	if (STRCMP(p_bsdir, "last") != 0
-		&& STRCMP(p_bsdir, "buffer") != 0
-		&& STRCMP(p_bsdir, "current") != 0
-		&& mch_isdir(p_bsdir))
-	    initdir = p_bsdir;
-	/* When saving or 'browsedir' is "buffer", use buffer fname */
-	else if (((flags & BROWSE_SAVE) || *p_bsdir == 'b')
-		&& buf != NULL && buf->b_ffname != NULL)
-	{
-	    if (dflt == NULL || *dflt == NUL)
-		dflt = gettail(curbuf->b_ffname);
-	    tofree = vim_strsave(curbuf->b_ffname);
-	    if (tofree != NULL)
-	    {
-		initdir = tofree;
-		*gettail(initdir) = NUL;
-	    }
-	}
-	/* When 'browsedir' is "last", use dir from last browse */
-	else if (*p_bsdir == 'l')
-	    initdir = last_dir;
-	/* When 'browsedir is "current", use current directory.  This is the
-	 * default already, leave initdir empty. */
-    }
-
-# ifdef FEAT_GUI
-    if (gui.in_use)		/* when this changes, also adjust f_has()! */
-    {
-	if (filter == NULL
-#  ifdef FEAT_EVAL
-		&& (filter = get_var_value((char_u *)"b:browsefilter")) == NULL
-		&& (filter = get_var_value((char_u *)"g:browsefilter")) == NULL
-#  endif
-	)
-	    filter = BROWSE_FILTER_DEFAULT;
-	if (flags & BROWSE_DIR)
-	{
-#  if defined(FEAT_GUI_GTK) || defined(WIN3264)
-	    /* For systems that have a directory dialog. */
-	    fname = gui_mch_browsedir(title, initdir);
-#  else
-	    /* Generic solution for selecting a directory: select a file and
-	     * remove the file name. */
-	    fname = gui_mch_browse(0, title, dflt, ext, initdir, (char_u *)"");
-#  endif
-#  if !defined(FEAT_GUI_GTK)
-	    /* Win32 adds a dummy file name, others return an arbitrary file
-	     * name.  GTK+ 2 returns only the directory, */
-	    if (fname != NULL && *fname != NUL && !mch_isdir(fname))
-	    {
-		/* Remove the file name. */
-		char_u	    *tail = gettail_sep(fname);
-
-		if (tail == fname)
-		    *tail++ = '.';	/* use current dir */
-		*tail = NUL;
-	    }
-#  endif
-	}
-	else
-	    fname = gui_mch_browse(flags & BROWSE_SAVE,
-			       title, dflt, ext, initdir, (char_u *)_(filter));
-
-	/* We hang around in the dialog for a while, the user might do some
-	 * things to our files.  The Win32 dialog allows deleting or renaming
-	 * a file, check timestamps. */
-	need_check_timestamps = TRUE;
-	did_check_timestamps = FALSE;
-    }
-    else
-# endif
-    {
-	/* TODO: non-GUI file selector here */
-	emsg(_("E338: Sorry, no file browser in console mode"));
-	fname = NULL;
-    }
-
-    /* keep the directory for next time */
-    if (fname != NULL)
-    {
-	vim_free(last_dir);
-	last_dir = vim_strsave(fname);
-	if (last_dir != NULL && !(flags & BROWSE_DIR))
-	{
-	    *gettail(last_dir) = NUL;
-	    if (*last_dir == NUL)
-	    {
-		/* filename only returned, must be in current dir */
-		vim_free(last_dir);
-		last_dir = alloc(MAXPATHL);
-		if (last_dir != NULL)
-		    mch_dirname(last_dir, MAXPATHL);
-	    }
-	}
-    }
-
-    vim_free(tofree);
-    cmdmod.browse = save_browse;
-
-    return fname;
-}
-#endif
 
 #if defined(FEAT_EVAL)
 static char *e_printf = N_("E766: Insufficient arguments for printf()");
@@ -4446,7 +4363,6 @@ vim_vsnprintf_typval(
 	    case 'c':
 	    case 's':
 	    case 'S':
-		length_modifier = '\0';
 		str_arg_l = 1;
 		switch (fmt_spec)
 		{
@@ -4720,7 +4636,7 @@ vim_vsnprintf_typval(
 			else if (length_modifier == 'L')
 			{
 # ifdef FEAT_NUM64
-#  ifdef WIN3264
+#  ifdef MSWIN
 			    f[f_l++] = 'I';
 			    f[f_l++] = '6';
 			    f[f_l++] = '4';
@@ -4827,7 +4743,6 @@ vim_vsnprintf_typval(
 				 * zero value is formatted with an
 				 * explicit precision of zero */
 				precision = num_of_digits + 1;
-				precision_specified = 1;
 			    }
 			}
 			/* zero padding to specified precision? */

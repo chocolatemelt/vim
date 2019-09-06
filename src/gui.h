@@ -29,6 +29,12 @@
 # include <gtk/gtk.h>
 #endif
 
+// Needed when generating prototypes, since FEAT_GUI is always defined then.
+#if defined(FEAT_XCLIPBOARD) && !defined(FEAT_GUI_MOTIF) \
+	&& !defined(FEAT_GUI_ATHENA) && !defined(FEAT_GUI_GTK)
+# include <X11/Intrinsic.h>
+#endif
+
 #ifdef FEAT_GUI_MAC
 # include <Types.h>
 /*# include <Memory.h>*/
@@ -90,7 +96,7 @@
  * X_2_COL  - Convert X pixel coord into character column.
  * Y_2_ROW  - Convert Y pixel coord into character row.
  */
-#ifdef FEAT_GUI_W32
+#ifdef FEAT_GUI_MSWIN
 # define TEXT_X(col)	((col) * gui.char_width)
 # define TEXT_Y(row)	((row) * gui.char_height + gui.char_ascent)
 # define FILL_X(col)	((col) * gui.char_width)
@@ -237,6 +243,16 @@ typedef long	    guicolor_T;	/* handle for a GUI color; for X11 this should
 # endif
 #endif
 
+#ifdef VIMDLL
+// Use spawn when GUI is starting.
+# define GUI_MAY_SPAWN
+
+// Uncomment the next definition if you want to use the `:gui` command on
+// Windows.  It uses `:mksession` to inherit the session from vim.exe to
+// gvim.exe.  So, it doesn't work perfectly. (EXPERIMENTAL)
+//# define EXPERIMENTAL_GUI_CMD
+#endif
+
 typedef struct Gui
 {
     int		in_focus;	    /* Vim has input focus */
@@ -245,6 +261,9 @@ typedef struct Gui
     int		shell_created;	    /* Has the shell been created yet? */
     int		dying;		    /* Is vim dying? Then output to terminal */
     int		dofork;		    /* Use fork() when GUI is starting */
+#ifdef GUI_MAY_SPAWN
+    int		dospawn;	    /* Use spawn() when GUI is starting */
+#endif
     int		dragged_sb;	    /* Which scrollbar being dragged, if any? */
     win_T	*dragged_wp;	    /* Which WIN's sb being dragged, if any? */
     int		pointer_hidden;	    /* Is the mouse pointer hidden? */
@@ -406,7 +425,7 @@ typedef struct Gui
 #endif	/* FEAT_GUI_GTK */
 
 #if defined(FEAT_GUI_TABLINE) \
-	&& (defined(FEAT_GUI_W32) || defined(FEAT_GUI_MOTIF) \
+	&& (defined(FEAT_GUI_MSWIN) || defined(FEAT_GUI_MOTIF) \
 		|| defined(FEAT_GUI_MAC))
     int		tabline_height;
 #endif

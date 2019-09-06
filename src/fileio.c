@@ -27,12 +27,9 @@
 /* Is there any system that doesn't have access()? */
 #define USE_MCH_ACCESS
 
-static char_u *next_fenc(char_u **pp);
+static char_u *next_fenc(char_u **pp, int *alloced);
 #ifdef FEAT_EVAL
 static char_u *readfile_charconvert(char_u *fname, char_u *fenc, int *fdp);
-#endif
-#ifdef FEAT_VIMINFO
-static void check_marks_read(void);
 #endif
 #ifdef FEAT_CRYPT
 static char_u *check_for_cryptkey(char_u *cryptkey, char_u *ptr, long *sizep, off_T *filesizep, int newfile, char_u *fname, int *did_ask);
@@ -49,7 +46,7 @@ static int time_differs(long t1, long t2);
 #define FIO_UCS2	0x04	/* convert UCS-2 */
 #define FIO_UCS4	0x08	/* convert UCS-4 */
 #define FIO_UTF16	0x10	/* convert UTF-16 */
-#ifdef WIN3264
+#ifdef MSWIN
 # define FIO_CODEPAGE	0x20	/* convert MS-Windows codepage */
 # define FIO_PUT_CP(x) (((x) & 0xffff) << 16)	/* put codepage in top word */
 # define FIO_GET_CP(x)	(((x)>>16) & 0xffff)	/* get codepage from top word */
@@ -89,7 +86,7 @@ struct bw_info
     int		bw_restlen;	/* nr of bytes in bw_rest[] */
     int		bw_first;	/* first write call */
     char_u	*bw_conv_buf;	/* buffer for writing converted chars */
-    int		bw_conv_buflen; /* size of bw_conv_buf */
+    size_t	bw_conv_buflen; /* size of bw_conv_buf */
     int		bw_conv_error;	/* set for conversion error */
     linenr_T	bw_conv_error_lnum;  /* first line with error or zero */
     linenr_T	bw_start_lnum;  /* line number at start of buffer */
@@ -106,7 +103,7 @@ static int need_conversion(char_u *fenc);
 static int get_fio_flags(char_u *ptr);
 static char_u *check_for_bom(char_u *p, long size, int *lenp, int flags);
 static int make_bom(char_u *buf, char_u *name);
-#ifdef WIN3264
+#ifdef MSWIN
 static int get_win_fio_flags(char_u *ptr);
 #endif
 #ifdef MACOS_CONVERT
@@ -114,7 +111,7 @@ static int get_mac_fio_flags(char_u *ptr);
 #endif
 static char *e_auchangedbuf = N_("E812: Autocommands changed buffer or buffer name");
 
-    void
+    static void
 filemess(
     buf_T	*buf,
     char_u	*name,
@@ -684,15 +681,13 @@ readfile(
 #endif
     }
 
-#if defined(HAS_SWAP_EXISTS_ACTION)
-    /* If "Quit" selected at ATTENTION dialog, don't load the file */
+    // If "Quit" selected at ATTENTION dialog, don't load the file
     if (swap_exists_action == SEA_QUIT)
     {
 	if (!read_buffer && !read_stdin)
 	    close(fd);
 	return FAIL;
     }
-#endif
 
     ++no_wait_return;	    /* don't wait for return yet */
 
@@ -792,7 +787,10 @@ readfile(
 	    if (!is_not_a_term())
 	    {
 #ifndef ALWAYS_USE_GUI
-		mch_msg(_("Vim: Reading from stdin...\n"));
+# ifdef VIMDLL
+		if (!gui.in_use)
+# endif
+		    mch_msg(_("Vim: Reading from stdin...\n"));
 #endif
 #ifdef FEAT_GUI
 		/* Also write a message in the GUI window, if there is one. */
@@ -892,8 +890,7 @@ readfile(
     else
     {
 	fenc_next = p_fencs;		/* try items in 'fileencodings' */
-	fenc = next_fenc(&fenc_next);
-	fenc_alloced = TRUE;
+	fenc = next_fenc(&fenc_next, &fenc_alloced);
     }
 
     /*
@@ -996,8 +993,7 @@ retry:
 		vim_free(fenc);
 	    if (fenc_next != NULL)
 	    {
-		fenc = next_fenc(&fenc_next);
-		fenc_alloced = (fenc_next != NULL);
+		fenc = next_fenc(&fenc_next, &fenc_alloced);
 	    }
 	    else
 	    {
@@ -1038,7 +1034,7 @@ retry:
 	else if (enc_utf8 || STRCMP(p_enc, "latin1") == 0)
 	    fio_flags = get_fio_flags(fenc);
 
-#ifdef WIN3264
+#ifdef MSWIN
 	/*
 	 * Conversion from an MS-Windows codepage to UTF-8 or another codepage
 	 * is handled with MultiByteToWideChar().
@@ -1188,7 +1184,7 @@ retry:
 	    {
 		for ( ; size >= 10; size = (long)((long_u)size >> 1))
 		{
-		    if ((new_buffer = lalloc((long_u)(size + linerest + 1),
+		    if ((new_buffer = lalloc(size + linerest + 1,
 							      FALSE)) != NULL)
 			break;
 		}
@@ -1229,7 +1225,7 @@ retry:
 		    size = (size * 2 / 3) & ~3;
 		else if (fio_flags == FIO_UCSBOM)
 		    size = size / ICONV_MULT;	/* worst case */
-#ifdef WIN3264
+#ifdef MSWIN
 		else if (fio_flags & FIO_CODEPAGE)
 		    size = size / ICONV_MULT;	/* also worst case */
 #endif
@@ -1590,7 +1586,7 @@ retry:
 	    }
 #endif
 
-#ifdef WIN3264
+#ifdef MSWIN
 	    if (fio_flags & FIO_CODEPAGE)
 	    {
 		char_u	*src, *dst;
@@ -2322,10 +2318,7 @@ failed:
 	vim_free(fenc);
 #ifdef USE_ICONV
     if (iconv_fd != (iconv_t)-1)
-    {
 	iconv_close(iconv_fd);
-	iconv_fd = (iconv_t)-1;
-    }
 #endif
 
     if (!read_buffer && !read_stdin)
@@ -2559,7 +2552,7 @@ failed:
 	curbuf->b_op_end.lnum = from + linecnt;
 	curbuf->b_op_end.col = 0;
 
-#ifdef WIN32
+#ifdef MSWIN
 	/*
 	 * Work around a weird problem: When a file has two links (only
 	 * possible on NTFS) and we write through one link, then stat() it
@@ -2766,14 +2759,16 @@ set_forced_fenc(exarg_T *eap)
  * "pp" points to fenc_next.  It's advanced to the next item.
  * When there are no more items, an empty string is returned and *pp is set to
  * NULL.
- * When *pp is not set to NULL, the result is in allocated memory.
+ * When *pp is not set to NULL, the result is in allocated memory and "alloced"
+ * is set to TRUE.
  */
     static char_u *
-next_fenc(char_u **pp)
+next_fenc(char_u **pp, int *alloced)
 {
     char_u	*p;
     char_u	*r;
 
+    *alloced = FALSE;
     if (**pp == NUL)
     {
 	*pp = NULL;
@@ -2796,8 +2791,11 @@ next_fenc(char_u **pp)
 	    r = p;
 	}
     }
-    if (r == NULL)	/* out of memory */
+    if (r != NULL)
+	*alloced = TRUE;
+    else
     {
+	// out of memory
 	r = (char_u *)"";
 	*pp = NULL;
     }
@@ -2854,25 +2852,6 @@ readfile_charconvert(
 	*fdp = mch_open((char *)fname, O_RDONLY | O_EXTRA, 0);
 
     return tmpname;
-}
-#endif
-
-
-#ifdef FEAT_VIMINFO
-/*
- * Read marks for the current buffer from the viminfo file, when we support
- * buffer marks and the buffer has a name.
- */
-    static void
-check_marks_read(void)
-{
-    if (!curbuf->b_marks_read && get_viminfo_parameter('\'') > 0
-						  && curbuf->b_ffname != NULL)
-	read_viminfo(NULL, VIF_WANT_MARKS);
-
-    /* Always set b_marks_read; needed when 'viminfo' is changed to include
-     * the ' parameter after opening a buffer. */
-    curbuf->b_marks_read = TRUE;
 }
 #endif
 
@@ -3162,7 +3141,7 @@ buf_write(
 	    && whole
 	    && buf == curbuf
 #ifdef FEAT_QUICKFIX
-	    && !bt_nofile(buf)
+	    && !bt_nofilename(buf)
 #endif
 	    && !filtering
 	    && (!append || vim_strchr(p_cpo, CPO_FNAMEAPP) != NULL)
@@ -3239,7 +3218,7 @@ buf_write(
 					 sfname, sfname, FALSE, curbuf, eap)))
 	    {
 #ifdef FEAT_QUICKFIX
-		if (overwriting && bt_nofile(curbuf))
+		if (overwriting && bt_nofilename(curbuf))
 		    nofile_err = TRUE;
 		else
 #endif
@@ -3272,7 +3251,7 @@ buf_write(
 	    else
 	    {
 #ifdef FEAT_QUICKFIX
-		if (overwriting && bt_nofile(curbuf))
+		if (overwriting && bt_nofilename(curbuf))
 		    nofile_err = TRUE;
 		else
 #endif
@@ -3286,7 +3265,7 @@ buf_write(
 					 sfname, sfname, FALSE, curbuf, eap)))
 	    {
 #ifdef FEAT_QUICKFIX
-		if (overwriting && bt_nofile(curbuf))
+		if (overwriting && bt_nofilename(curbuf))
 		    nofile_err = TRUE;
 		else
 #endif
@@ -3601,13 +3580,13 @@ buf_write(
      */
     if (!(append && *p_pm == NUL) && !filtering && perm >= 0 && dobackup)
     {
-#if defined(UNIX) || defined(WIN32)
+#if defined(UNIX) || defined(MSWIN)
 	stat_T	    st;
 #endif
 
 	if ((bkc & BKC_YES) || append)	/* "yes" */
 	    backup_copy = TRUE;
-#if defined(UNIX) || defined(WIN32)
+#if defined(UNIX) || defined(MSWIN)
 	else if ((bkc & BKC_AUTO))	/* "auto" */
 	{
 	    int		i;
@@ -3632,7 +3611,7 @@ buf_write(
 		backup_copy = TRUE;
 	    else
 # else
-#  ifdef WIN32
+#  ifdef MSWIN
 	    /* On NTFS file systems hard links are possible. */
 	    if (mch_is_linked(fname))
 		backup_copy = TRUE;
@@ -3715,7 +3694,7 @@ buf_write(
 		    && (lstat_res != 0 || st.st_ino == st_old.st_ino))
 		backup_copy = FALSE;
 # else
-#  if defined(WIN32)
+#  if defined(MSWIN)
 	    /* Symlinks. */
 	    if ((bkc & BKC_BREAKSYMLINK) && mch_is_symbolic_link(fname))
 		backup_copy = FALSE;
@@ -3744,7 +3723,7 @@ buf_write(
 	    stat_T	st_new;
 	    char_u	*dirp;
 	    char_u	*rootname;
-#if defined(UNIX) || defined(WIN3264)
+#if defined(UNIX) || defined(MSWIN)
 	    char_u      *p;
 #endif
 #if defined(UNIX)
@@ -3785,7 +3764,7 @@ buf_write(
 		 */
 		(void)copy_option_part(&dirp, copybuf, BUFSIZE, ",");
 
-#if defined(UNIX) || defined(WIN3264)
+#if defined(UNIX) || defined(MSWIN)
 		p = copybuf + STRLEN(copybuf);
 		if (after_pathsep(copybuf, p) && p[-1] == p[-2])
 		    // Ends with '//', use full path
@@ -4018,7 +3997,7 @@ buf_write(
 		 */
 		(void)copy_option_part(&dirp, IObuff, IOSIZE, ",");
 
-#if defined(UNIX) || defined(WIN3264)
+#if defined(UNIX) || defined(MSWIN)
 		p = IObuff + STRLEN(IObuff);
 		if (after_pathsep(IObuff, p) && p[-1] == p[-2])
 		    // path ends with '//', use full path
@@ -4170,20 +4149,18 @@ buf_write(
 		write_info.bw_conv_buflen = bufsize * 2;
 	    else /* FIO_UCS4 */
 		write_info.bw_conv_buflen = bufsize * 4;
-	    write_info.bw_conv_buf
-			   = lalloc((long_u)write_info.bw_conv_buflen, TRUE);
+	    write_info.bw_conv_buf = alloc(write_info.bw_conv_buflen);
 	    if (write_info.bw_conv_buf == NULL)
 		end = 0;
 	}
     }
 
-#ifdef WIN3264
+#ifdef MSWIN
     if (converted && wb_flags == 0 && (wb_flags = get_win_fio_flags(fenc)) != 0)
     {
 	/* Convert UTF-8 -> UCS-2 and UCS-2 -> DBCS.  Worst-case * 4: */
 	write_info.bw_conv_buflen = bufsize * 4;
-	write_info.bw_conv_buf
-			    = lalloc((long_u)write_info.bw_conv_buflen, TRUE);
+	write_info.bw_conv_buf = alloc(write_info.bw_conv_buflen);
 	if (write_info.bw_conv_buf == NULL)
 	    end = 0;
     }
@@ -4193,8 +4170,7 @@ buf_write(
     if (converted && wb_flags == 0 && (wb_flags = get_mac_fio_flags(fenc)) != 0)
     {
 	write_info.bw_conv_buflen = bufsize * 3;
-	write_info.bw_conv_buf
-			    = lalloc((long_u)write_info.bw_conv_buflen, TRUE);
+	write_info.bw_conv_buf = alloc(write_info.bw_conv_buflen);
 	if (write_info.bw_conv_buf == NULL)
 	    end = 0;
     }
@@ -4214,8 +4190,7 @@ buf_write(
 	{
 	    /* We're going to use iconv(), allocate a buffer to convert in. */
 	    write_info.bw_conv_buflen = bufsize * ICONV_MULT;
-	    write_info.bw_conv_buf
-			   = lalloc((long_u)write_info.bw_conv_buflen, TRUE);
+	    write_info.bw_conv_buf = alloc(write_info.bw_conv_buflen);
 	    if (write_info.bw_conv_buf == NULL)
 		end = 0;
 	    write_info.bw_first = TRUE;
@@ -4416,7 +4391,7 @@ restore_backup:
 		vim_ignored = ftruncate(fd, (off_t)0);
 #endif
 
-#if defined(WIN3264)
+#if defined(MSWIN)
 	    if (backup != NULL && overwriting && !append)
 	    {
 		if (backup_copy)
@@ -4661,7 +4636,7 @@ restore_backup:
 	 * work (could be a pipe).
 	 * If the 'fsync' option is FALSE, don't fsync().  Useful for laptops.
 	 */
-	if (p_fs && fsync(fd) != 0 && !device)
+	if (p_fs && vim_fsync(fd) != 0 && !device)
 	{
 	    errmsg = (char_u *)_(e_fsync);
 	    end = 0;
@@ -4914,8 +4889,8 @@ restore_backup:
 	    && !write_info.bw_conv_error
 	    && (overwriting || vim_strchr(p_cpo, CPO_PLUS) != NULL))
     {
-	unchanged(buf, TRUE);
-	/* b:changedtick is always incremented in unchanged() but that
+	unchanged(buf, TRUE, FALSE);
+	/* b:changedtick is may be incremented in unchanged() but that
 	 * should not trigger a TextChanged event. */
 	if (buf->b_last_changedtick + 1 == CHANGEDTICK(buf))
 	    buf->b_last_changedtick = CHANGEDTICK(buf);
@@ -4987,10 +4962,10 @@ restore_backup:
 	}
     }
 
-    /*
-     * Remove the backup unless 'backup' option is set
-     */
-    if (!p_bk && backup != NULL && mch_remove(backup) != 0)
+    // Remove the backup unless 'backup' option is set or there was a
+    // conversion error.
+    if (!p_bk && backup != NULL && !write_info.bw_conv_error
+	    && mch_remove(backup) != 0)
 	emsg(_("E207: Can't delete backup file"));
 
     goto nofail;
@@ -5123,6 +5098,25 @@ nofail:
     return retval;
 }
 
+#if defined(HAVE_FSYNC) || defined(PROTO)
+/*
+ * Call fsync() with Mac-specific exception.
+ * Return fsync() result: zero for success.
+ */
+    int
+vim_fsync(int fd)
+{
+    int r;
+
+# ifdef MACOS_X
+    r = fcntl(fd, F_FULLFSYNC);
+    if (r != 0)  // F_FULLFSYNC not working or not supported
+# endif
+	r = fsync(fd);
+    return r;
+}
+#endif
+
 /*
  * Set the name of the current buffer.  Use when the buffer doesn't have a
  * name and a ":r" or ":w" command with a file name is used.
@@ -5197,14 +5191,12 @@ msg_add_fileformat(int eol_type)
 	return TRUE;
     }
 #endif
-#ifndef USE_CR
     if (eol_type == EOL_MAC)
     {
 	STRCAT(IObuff, shortmess(SHM_TEXT) ? _("[mac]") : _("[mac format]"));
 	return TRUE;
     }
-#endif
-#if defined(USE_CRNL) || defined(USE_CR)
+#ifdef USE_CRNL
     if (eol_type == EOL_UNIX)
     {
 	STRCAT(IObuff, shortmess(SHM_TEXT) ? _("[unix]") : _("[unix format]"));
@@ -5413,7 +5405,7 @@ buf_write_bytes(struct bw_info *ip)
 	    }
 	}
 
-#ifdef WIN3264
+#ifdef MSWIN
 	else if (flags & FIO_CODEPAGE)
 	{
 	    /*
@@ -5852,7 +5844,7 @@ get_fio_flags(char_u *ptr)
     return 0;
 }
 
-#ifdef WIN3264
+#ifdef MSWIN
 /*
  * Check "ptr" for a MS-Windows codepage name and return the FIO_ flags needed
  * for the conversion MS-Windows can do for us.  Also accept "utf-8".
@@ -6024,9 +6016,9 @@ shorten_fname(char_u *full_path, char_u *dir_name)
 	p = full_path + len;
 #if defined(MSWIN)
 	/*
-	 * MSWIN: when a file is in the root directory, dir_name will end in a
-	 * slash, since C: by itself does not define a specific dir. In this
-	 * case p may already be correct. <negri>
+	 * MS-Windows: when a file is in the root directory, dir_name will end
+	 * in a slash, since C: by itself does not define a specific dir. In
+	 * this case p may already be correct. <negri>
 	 */
 	if (!((len > 2) && (*(p - 2) == ':')))
 #endif
@@ -6072,7 +6064,7 @@ shorten_buf_fname(buf_T *buf, char_u *dirname, int force)
 
     if (buf->b_fname != NULL
 #ifdef FEAT_QUICKFIX
-	    && !bt_nofile(buf)
+	    && !bt_nofilename(buf)
 #endif
 	    && !path_with_url(buf->b_fname)
 	    && (force
@@ -6112,6 +6104,9 @@ shorten_fnames(int force)
     }
     status_redraw_all();
     redraw_tabline = TRUE;
+#ifdef FEAT_TEXT_PROP
+    popup_update_preview_title();
+#endif
 }
 
 #if (defined(FEAT_DND) && defined(FEAT_GUI_GTK)) \
@@ -6188,7 +6183,7 @@ buf_modname(
      */
     if (fname == NULL || *fname == NUL)
     {
-	retval = alloc((unsigned)(MAXPATHL + extlen + 3));
+	retval = alloc(MAXPATHL + extlen + 3);
 	if (retval == NULL)
 	    return NULL;
 	if (mch_dirname(retval, MAXPATHL) == FAIL ||
@@ -6207,7 +6202,7 @@ buf_modname(
     else
     {
 	fnamelen = (int)STRLEN(fname);
-	retval = alloc((unsigned)(fnamelen + extlen + 3));
+	retval = alloc(fnamelen + extlen + 3);
 	if (retval == NULL)
 	    return NULL;
 	STRCPY(retval, fname);
@@ -6224,13 +6219,7 @@ buf_modname(
      */
     for (ptr = retval + fnamelen; ptr > retval; MB_PTR_BACK(retval, ptr))
     {
-	if (*ext == '.'
-#ifdef USE_LONG_FNAME
-		    && (!USE_LONG_FNAME || shortname)
-#else
-		    && shortname
-#endif
-								)
+	if (*ext == '.' && shortname)
 	    if (*ptr == '.')	/* replace '.' by '_' */
 		*ptr = '_';
 	if (vim_ispathsep(*ptr))
@@ -6249,11 +6238,7 @@ buf_modname(
     /*
      * For 8.3 file names we may have to reduce the length.
      */
-#ifdef USE_LONG_FNAME
-    if (!USE_LONG_FNAME || shortname)
-#else
     if (shortname)
-#endif
     {
 	/*
 	 * If there is no file name, or the file name ends in '/', and the
@@ -6291,7 +6276,7 @@ buf_modname(
 	else if ((int)STRLEN(e) + extlen > 4)
 	    s = e + 4 - extlen;
     }
-#if defined(USE_LONG_FNAME) || defined(WIN3264)
+#ifdef MSWIN
     /*
      * If there is no file name, and the extension starts with '.', put a
      * '_' before the dot, because just ".ext" may be invalid if it's on a
@@ -6310,11 +6295,7 @@ buf_modname(
     /*
      * Prepend the dot.
      */
-    if (prepend_dot && !shortname && *(e = gettail(retval)) != '.'
-#ifdef USE_LONG_FNAME
-	    && USE_LONG_FNAME
-#endif
-				)
+    if (prepend_dot && !shortname && *(e = gettail(retval)) != '.')
     {
 	STRMOVE(e + 1, e);
 	*e = '.';
@@ -6354,11 +6335,7 @@ vim_fgets(char_u *buf, int size, FILE *fp)
     char	tbuf[FGETS_SIZE];
 
     buf[size - 2] = NUL;
-#ifdef USE_CR
-    eof = fgets_cr((char *)buf, size, fp);
-#else
     eof = fgets((char *)buf, size, fp);
-#endif
     if (buf[size - 2] != NUL && buf[size - 2] != '\n')
     {
 	buf[size - 1] = NUL;	    /* Truncate the line */
@@ -6367,56 +6344,11 @@ vim_fgets(char_u *buf, int size, FILE *fp)
 	do
 	{
 	    tbuf[FGETS_SIZE - 2] = NUL;
-#ifdef USE_CR
-	    vim_ignoredp = fgets_cr((char *)tbuf, FGETS_SIZE, fp);
-#else
 	    vim_ignoredp = fgets((char *)tbuf, FGETS_SIZE, fp);
-#endif
 	} while (tbuf[FGETS_SIZE - 2] != NUL && tbuf[FGETS_SIZE - 2] != '\n');
     }
     return (eof == NULL);
 }
-
-#if defined(USE_CR) || defined(PROTO)
-/*
- * Like vim_fgets(), but accept any line terminator: CR, CR-LF or LF.
- * Returns TRUE for end-of-file.
- * Only used for the Mac, because it's much slower than vim_fgets().
- */
-    int
-tag_fgets(char_u *buf, int size, FILE *fp)
-{
-    int		i = 0;
-    int		c;
-    int		eof = FALSE;
-
-    for (;;)
-    {
-	c = fgetc(fp);
-	if (c == EOF)
-	{
-	    eof = TRUE;
-	    break;
-	}
-	if (c == '\r')
-	{
-	    /* Always store a NL for end-of-line. */
-	    if (i < size - 1)
-		buf[i++] = '\n';
-	    c = fgetc(fp);
-	    if (c != '\n')	/* Macintosh format: single CR. */
-		ungetc(c, fp);
-	    break;
-	}
-	if (i < size - 1)
-	    buf[i++] = c;
-	if (c == '\n')
-	    break;
-    }
-    buf[i] = NUL;
-    return eof;
-}
-#endif
 
 /*
  * rename() only works if both files are on the same file system, this
@@ -6473,7 +6405,7 @@ vim_rename(char_u *from, char_u *to)
 	    use_tmp_file = TRUE;
     }
 #endif
-#ifdef WIN3264
+#ifdef MSWIN
     {
 	BY_HANDLE_FILE_INFORMATION info1, info2;
 
@@ -6585,7 +6517,7 @@ vim_rename(char_u *from, char_u *to)
 	return -1;
     }
 
-    buffer = (char *)alloc(BUFSIZE);
+    buffer = alloc(BUFSIZE);
     if (buffer == NULL)
     {
 	close(fd_out);
@@ -6816,15 +6748,16 @@ buf_check_timestamp(
 #endif
 		))
     {
+	long prev_b_mtime = buf->b_mtime;
+
 	retval = 1;
 
 	// set b_mtime to stop further warnings (e.g., when executing
 	// FileChangedShell autocmd)
 	if (stat_res < 0)
 	{
-	    // When 'autoread' is set we'll check the file again to see if it
-	    // re-appears.
-	    buf->b_mtime = buf->b_p_ar;
+	    // Check the file again later to see if it re-appears.
+	    buf->b_mtime = -1;
 	    buf->b_orig_size = 0;
 	    buf->b_orig_mode = 0;
 	}
@@ -6894,7 +6827,11 @@ buf_check_timestamp(
 	    if (!n)
 	    {
 		if (*reason == 'd')
-		    mesg = _("E211: File \"%s\" no longer available");
+		{
+		    // Only give the message once.
+		    if (prev_b_mtime != -1)
+			mesg = _("E211: File \"%s\" no longer available");
+		}
 		else
 		{
 		    helpmesg = TRUE;
@@ -6943,8 +6880,7 @@ buf_check_timestamp(
 	{
 	    if (!helpmesg)
 		mesg2 = "";
-	    tbuf = (char *)alloc((unsigned)(STRLEN(path) + STRLEN(mesg)
-							+ STRLEN(mesg2) + 2));
+	    tbuf = alloc(STRLEN(path) + STRLEN(mesg) + STRLEN(mesg2) + 2);
 	    sprintf(tbuf, mesg, path);
 #ifdef FEAT_EVAL
 	    /* Set warningmsg here, before the unimportant and output-specific
@@ -7135,7 +7071,7 @@ buf_reload(buf_T *buf, int orig_mode)
 	    else if (buf == curbuf)  /* "buf" still valid */
 	    {
 		/* Mark the buffer as unmodified and free undo info. */
-		unchanged(buf, TRUE);
+		unchanged(buf, TRUE, TRUE);
 		if ((flags & READ_KEEP_UNDO) == 0)
 		{
 		    u_blockfree(buf);
@@ -7220,44 +7156,190 @@ write_lnum_adjust(linenr_T offset)
 
 #if defined(TEMPDIRNAMES) || defined(FEAT_EVAL) || defined(PROTO)
 /*
+ * Core part of "readdir()" function.
+ * Retrieve the list of files/directories of "path" into "gap".
+ * Return OK for success, FAIL for failure.
+ */
+    int
+readdir_core(
+    garray_T	*gap,
+    char_u	*path,
+    void	*context,
+    int		(*checkitem)(void *context, char_u *name))
+{
+    int			failed = FALSE;
+#ifdef MSWIN
+    char_u		*buf, *p;
+    int			ok;
+    HANDLE		hFind = INVALID_HANDLE_VALUE;
+    WIN32_FIND_DATAW    wfb;
+    WCHAR		*wn = NULL;	// UTF-16 name, NULL when not used.
+#endif
+
+    ga_init2(gap, (int)sizeof(char *), 20);
+
+#ifdef MSWIN
+    buf = alloc(MAXPATHL);
+    if (buf == NULL)
+	return FAIL;
+    STRNCPY(buf, path, MAXPATHL-5);
+    p = buf + STRLEN(buf);
+    MB_PTR_BACK(buf, p);
+    if (*p == '\\' || *p == '/')
+	*p = NUL;
+    STRCAT(buf, "\\*");
+
+    wn = enc_to_utf16(buf, NULL);
+    if (wn != NULL)
+	hFind = FindFirstFileW(wn, &wfb);
+    ok = (hFind != INVALID_HANDLE_VALUE);
+    if (!ok)
+    {
+	failed = TRUE;
+	smsg(_(e_notopen), path);
+    }
+    else
+    {
+	while (ok)
+	{
+	    int	ignore;
+
+	    p = utf16_to_enc(wfb.cFileName, NULL);   // p is allocated here
+	    if (p == NULL)
+		break;  // out of memory
+
+	    ignore = p[0] == '.' && (p[1] == NUL
+					      || (p[1] == '.' && p[2] == NUL));
+	    if (!ignore && checkitem != NULL)
+	    {
+		int r = checkitem(context, p);
+
+		if (r < 0)
+		{
+		    vim_free(p);
+		    break;
+		}
+		if (r == 0)
+		    ignore = TRUE;
+	    }
+
+	    if (!ignore)
+	    {
+		if (ga_grow(gap, 1) == OK)
+		    ((char_u**)gap->ga_data)[gap->ga_len++] = vim_strsave(p);
+		else
+		{
+		    failed = TRUE;
+		    vim_free(p);
+		    break;
+		}
+	    }
+
+	    vim_free(p);
+	    ok = FindNextFileW(hFind, &wfb);
+	}
+	FindClose(hFind);
+    }
+
+    vim_free(buf);
+    vim_free(wn);
+#else
+    DIR		*dirp;
+    struct dirent *dp;
+    char_u	*p;
+
+    dirp = opendir((char *)path);
+    if (dirp == NULL)
+    {
+	failed = TRUE;
+	smsg(_(e_notopen), path);
+    }
+    else
+    {
+	for (;;)
+	{
+	    int	ignore;
+
+	    dp = readdir(dirp);
+	    if (dp == NULL)
+		break;
+	    p = (char_u *)dp->d_name;
+
+	    ignore = p[0] == '.' &&
+		    (p[1] == NUL ||
+		     (p[1] == '.' && p[2] == NUL));
+	    if (!ignore && checkitem != NULL)
+	    {
+		int r = checkitem(context, p);
+
+		if (r < 0)
+		    break;
+		if (r == 0)
+		    ignore = TRUE;
+	    }
+
+	    if (!ignore)
+	    {
+		if (ga_grow(gap, 1) == OK)
+		    ((char_u**)gap->ga_data)[gap->ga_len++] = vim_strsave(p);
+		else
+		{
+		    failed = TRUE;
+		    break;
+		}
+	    }
+	}
+
+	closedir(dirp);
+    }
+#endif
+
+    if (!failed && gap->ga_len > 0)
+	sort_strings((char_u **)gap->ga_data, gap->ga_len);
+
+    return failed ? FAIL : OK;
+}
+
+/*
  * Delete "name" and everything in it, recursively.
- * return 0 for succes, -1 if some file was not deleted.
+ * return 0 for success, -1 if some file was not deleted.
  */
     int
 delete_recursive(char_u *name)
 {
     int result = 0;
-    char_u	**files;
-    int		file_count;
     int		i;
     char_u	*exp;
+    garray_T	ga;
 
-    /* A symbolic link to a directory itself is deleted, not the directory it
-     * points to. */
+    // A symbolic link to a directory itself is deleted, not the directory it
+    // points to.
     if (
-# if defined(UNIX) || defined(WIN32)
+# if defined(UNIX) || defined(MSWIN)
 	 mch_isrealdir(name)
 # else
 	 mch_isdir(name)
 # endif
 	    )
     {
-	vim_snprintf((char *)NameBuff, MAXPATHL, "%s/*", name);
-	exp = vim_strsave(NameBuff);
+	exp = vim_strsave(name);
 	if (exp == NULL)
 	    return -1;
-	if (gen_expand_wildcards(1, &exp, &file_count, &files,
-	      EW_DIR|EW_FILE|EW_SILENT|EW_ALLLINKS|EW_DODOT|EW_EMPTYOK) == OK)
+	if (readdir_core(&ga, exp, NULL, NULL) == OK)
 	{
-	    for (i = 0; i < file_count; ++i)
-		if (delete_recursive(files[i]) != 0)
+	    for (i = 0; i < ga.ga_len; ++i)
+	    {
+		vim_snprintf((char *)NameBuff, MAXPATHL, "%s/%s", exp,
+					    ((char_u **)ga.ga_data)[i]);
+		if (delete_recursive(NameBuff) != 0)
 		    result = -1;
-	    FreeWild(file_count, files);
+	    }
+	    ga_clear_strings(&ga);
 	}
 	else
 	    result = -1;
+	(void)mch_rmdir(exp);
 	vim_free(exp);
-	(void)mch_rmdir(name);
     }
     else
 	result = mch_remove(name) == 0 ? 0 : -1;
@@ -7294,7 +7376,7 @@ vim_settempdir(char_u *tempdir)
 {
     char_u	*buf;
 
-    buf = alloc((unsigned)MAXPATHL + 2);
+    buf = alloc(MAXPATHL + 2);
     if (buf != NULL)
     {
 	if (vim_FullName(tempdir, buf, MAXPATHL, FALSE) == FAIL)
@@ -7322,6 +7404,8 @@ vim_tempname(
 {
 #ifdef USE_TMPNAM
     char_u	itmp[L_tmpnam];	/* use tmpnam() */
+#elif defined(MSWIN)
+    WCHAR	itmp[TEMPNAMELEN];
 #else
     char_u	itmp[TEMPNAMELEN];
 #endif
@@ -7442,37 +7526,37 @@ vim_tempname(
 
 #else /* TEMPDIRNAMES */
 
-# ifdef WIN3264
-    char	szTempFile[_MAX_PATH + 1];
-    char	buf4[4];
+# ifdef MSWIN
+    WCHAR	wszTempFile[_MAX_PATH + 1];
+    WCHAR	buf4[4];
     char_u	*retval;
     char_u	*p;
 
-    STRCPY(itmp, "");
-    if (GetTempPath(_MAX_PATH, szTempFile) == 0)
+    wcscpy(itmp, L"");
+    if (GetTempPathW(_MAX_PATH, wszTempFile) == 0)
     {
-	szTempFile[0] = '.';	/* GetTempPath() failed, use current dir */
-	szTempFile[1] = NUL;
+	wszTempFile[0] = L'.';	// GetTempPathW() failed, use current dir
+	wszTempFile[1] = NUL;
     }
-    strcpy(buf4, "VIM");
+    wcscpy(buf4, L"VIM");
     buf4[2] = extra_char;   /* make it "VIa", "VIb", etc. */
-    if (GetTempFileName(szTempFile, buf4, 0, (LPSTR)itmp) == 0)
+    if (GetTempFileNameW(wszTempFile, buf4, 0, itmp) == 0)
 	return NULL;
     if (!keep)
-	/* GetTempFileName() will create the file, we don't want that */
-	(void)DeleteFile((LPSTR)itmp);
+	// GetTempFileName() will create the file, we don't want that
+	(void)DeleteFileW(itmp);
 
-    /* Backslashes in a temp file name cause problems when filtering with
-     * "sh".  NOTE: This also checks 'shellcmdflag' to help those people who
-     * didn't set 'shellslash'. */
-    retval = vim_strsave(itmp);
+    // Backslashes in a temp file name cause problems when filtering with
+    // "sh".  NOTE: This also checks 'shellcmdflag' to help those people who
+    // didn't set 'shellslash'.
+    retval = utf16_to_enc(itmp, NULL);
     if (*p_shcf == '-' || p_ssl)
 	for (p = retval; *p; ++p)
 	    if (*p == '\\')
 		*p = '/';
     return retval;
 
-# else /* WIN3264 */
+# else // MSWIN
 
 #  ifdef USE_TMPNAM
     char_u	*p;
@@ -7510,7 +7594,7 @@ vim_tempname(
 #  endif
 
     return vim_strsave(itmp);
-# endif /* WIN3264 */
+# endif // MSWIN
 #endif /* TEMPDIRNAMES */
 }
 

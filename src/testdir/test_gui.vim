@@ -1,9 +1,8 @@
 " Tests specifically for the GUI
 
 source shared.vim
-if !CanRunGui()
-  finish
-endif
+source check.vim
+CheckCanRunGui
 
 source setup_gui.vim
 
@@ -128,10 +127,9 @@ func Test_quoteplus()
 
     let test_call     = 'Can you hear me?'
     let test_response = 'Yes, I can.'
-    let vim_exe = exepath(v:progpath)
+    let vim_exe = GetVimCommand()
     let testee = 'VIMRUNTIME=' . $VIMRUNTIME . '; export VIMRUNTIME;'
-          \ . vim_exe
-	  \ . ' -u NONE -U NONE --noplugin --not-a-term -c ''%s'''
+          \ . vim_exe . ' --noplugin --not-a-term -c ''%s'''
     " Ignore the "failed to create input context" error.
     let cmd = 'call test_ignore_error("E285") | '
 	  \ . 'gui -f | '
@@ -694,17 +692,42 @@ func Test_scrollbars()
   call setline(11, repeat('x', 150))
   redraw
   call assert_equal(1, wincol())
+  set number
+  redraw
+  call assert_equal(5, wincol())
+  set nonumber
+  redraw
   call assert_equal(1, col('.'))
 
   " scroll to character 11, cursor is moved
   call test_scrollbar('hor', 10, 0)
   redraw
   call assert_equal(1, wincol())
+  set number
+  redraw
+  call assert_equal(5, wincol())
+  set nonumber
+  redraw
   call assert_equal(11, col('.'))
 
   set guioptions&
   set wrap&
   bwipe!
+endfunc
+
+func Test_menu()
+  " Check Help menu exists
+  let help_menu = execute('menu Help')
+  call assert_match('Overview', help_menu)
+
+  " Check Help menu works
+  emenu Help.Overview
+  call assert_equal('help', &buftype)
+  close
+
+  " Check deleting menu doesn't cause trouble.
+  aunmenu Help
+  call assert_fails('menu Help', 'E329:')
 endfunc
 
 func Test_set_guipty()
@@ -718,6 +741,21 @@ func Test_set_guipty()
   call assert_equal(0, &guipty)
 
   let &guipty = guipty_saved
+endfunc
+
+func Test_encoding_conversion()
+  " GTK supports conversion between 'encoding' and "utf-8"
+  if has('gui_gtk')
+    let encoding_saved = &encoding
+    set encoding=latin1
+
+    " would be nice if we could take a screenshot
+    intro
+    " sets the window title
+    edit SomeFile
+
+    let &encoding = encoding_saved
+  endif
 endfunc
 
 func Test_shell_command()
@@ -752,10 +790,11 @@ endfunc
 func Test_gui_dash_g()
   let cmd = GetVimCommand('Xscriptgui')
   call writefile([""], "Xtestgui")
-  call writefile([
-	\ 'au GUIEnter * call writefile(["insertmode: " . &insertmode], "Xtestgui")',
-	\ 'au GUIEnter * qall',
-	\ ], 'Xscriptgui')
+  let lines =<< trim END
+	au GUIEnter * call writefile(["insertmode: " . &insertmode], "Xtestgui")
+	au GUIEnter * qall
+  END
+  call writefile(lines, 'Xscriptgui')
   call system(cmd . ' -g')
   call WaitForAssert({-> assert_equal(['insertmode: 0'], readfile('Xtestgui'))})
 
@@ -767,10 +806,11 @@ endfunc
 func Test_gui_dash_y()
   let cmd = GetVimCommand('Xscriptgui')
   call writefile([""], "Xtestgui")
-  call writefile([
-	\ 'au GUIEnter * call writefile(["insertmode: " . &insertmode], "Xtestgui")',
-	\ 'au GUIEnter * qall',
-	\ ], 'Xscriptgui')
+  let lines =<< trim END
+	au GUIEnter * call writefile(["insertmode: " . &insertmode], "Xtestgui")
+	au GUIEnter * qall
+  END
+  call writefile(lines, 'Xscriptgui')
   call system(cmd . ' -y')
   call WaitForAssert({-> assert_equal(['insertmode: 1'], readfile('Xtestgui'))})
 

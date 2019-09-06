@@ -1167,7 +1167,7 @@ gui_mch_prepare(int *argc, char **argv)
      * Move all the entries in argv which are relevant to X into gui_argv.
      */
     gui_argc = 0;
-    gui_argv = (char **)lalloc((long_u)(*argc * sizeof(char *)), FALSE);
+    gui_argv = LALLOC_MULT(char *, *argc);
     if (gui_argv == NULL)
 	return;
     gui_argv[gui_argc++] = argv[0];
@@ -2683,9 +2683,10 @@ gui_mch_wait_for_chars(long wtime)
 
     timed_out = FALSE;
 
-    if (wtime > 0)
-	timer = XtAppAddTimeOut(app_context, (long_u)wtime, gui_x11_timer_cb,
-								  &timed_out);
+    if (wtime >= 0)
+	timer = XtAppAddTimeOut(app_context,
+				(long_u)(wtime == 0 ? 1L : wtime),
+						 gui_x11_timer_cb, &timed_out);
 #ifdef FEAT_JOB_CHANNEL
     /* If there is a channel with the keep_open flag we need to poll for input
      * on them. */
@@ -2871,26 +2872,26 @@ gui_x11_check_copy_area(void)
  */
 
     void
-clip_mch_lose_selection(VimClipboard *cbd)
+clip_mch_lose_selection(Clipboard_T *cbd)
 {
     clip_x11_lose_selection(vimShell, cbd);
 }
 
     int
-clip_mch_own_selection(VimClipboard *cbd)
+clip_mch_own_selection(Clipboard_T *cbd)
 {
     return clip_x11_own_selection(vimShell, cbd);
 }
 
     void
-clip_mch_request_selection(VimClipboard *cbd)
+clip_mch_request_selection(Clipboard_T *cbd)
 {
  clip_x11_request_selection(vimShell, gui.dpy, cbd);
 }
 
     void
 clip_mch_set_selection(
-    VimClipboard	*cbd)
+    Clipboard_T	*cbd)
 {
     clip_x11_set_selection(cbd);
 }
@@ -3014,9 +3015,7 @@ gui_x11_send_event_handler(
 
     if (e->type == PropertyNotify && e->window == commWindow
 	    && e->atom == commProperty &&  e->state == PropertyNewValue)
-    {
 	serverEventProc(gui.dpy, event, 0);
-    }
 }
 #endif
 

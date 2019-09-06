@@ -38,11 +38,11 @@
  * Named character class support added by Walter Briscoe (1998 Jul 01)
  */
 
-/* Uncomment the first if you do not want to see debugging logs or files
- * related to regular expressions, even when compiling with -DDEBUG.
- * Uncomment the second to get the regexp debugging. */
-/* #undef DEBUG */
-/* #define DEBUG */
+// By default: do not create debugging logs or files related to regular
+// expressions, even when compiling with -DDEBUG.
+// Uncomment the second line to get the regexp debugging.
+#undef DEBUG
+// #define DEBUG
 
 #include "vim.h"
 
@@ -484,6 +484,12 @@ get_char_class(char_u **pp)
 #define CLASS_BACKSPACE 14
 	"escape:]",
 #define CLASS_ESCAPE 15
+	"ident:]",
+#define CLASS_IDENT 16
+	"keyword:]",
+#define CLASS_KEYWORD 17
+	"fname:]",
+#define CLASS_FNAME 18
     };
 #define CLASS_NONE 99
     int i;
@@ -698,6 +704,7 @@ static char_u	*re_put_long(char_u *pr, long_u val);
 static int	read_limits(long *, long *);
 static void	regtail(char_u *, char_u *);
 static void	regoptail(char_u *, char_u *);
+static int	reg_iswordc(int);
 
 static regengine_T bt_regengine;
 static regengine_T nfa_regengine;
@@ -723,7 +730,7 @@ get_equi_class(char_u **pp)
     int		l = 1;
     char_u	*p = *pp;
 
-    if (p[1] == '=')
+    if (p[1] == '=' && p[2] != NUL)
     {
 	if (has_mbyte)
 	    l = (*mb_ptr2len)(p + 2);
@@ -744,7 +751,7 @@ get_equi_class(char_u **pp)
 /*
  * Table for equivalence class "c". (IBM-1047)
  */
-char *EQUIVAL_CLASS_C[16] = {
+static char *EQUIVAL_CLASS_C[16] = {
     "A\x62\x63\x64\x65\x66\x67",
     "C\x68",
     "E\x71\x72\x73\x74",
@@ -1104,7 +1111,7 @@ get_coll_element(char_u **pp)
     int		l = 1;
     char_u	*p = *pp;
 
-    if (p[0] != NUL && p[1] == '.')
+    if (p[0] != NUL && p[1] == '.' && p[2] != NUL)
     {
 	if (has_mbyte)
 	    l = (*mb_ptr2len)(p + 2);
@@ -1312,7 +1319,7 @@ bt_regcomp(char_u *expr, int re_flags)
 	return NULL;
 
     /* Allocate space. */
-    r = (bt_regprog_T *)lalloc(sizeof(bt_regprog_T) + regsize, TRUE);
+    r = alloc(offsetof(bt_regprog_T, program) + regsize);
     if (r == NULL)
 	return NULL;
     r->re_in_use = FALSE;
@@ -2168,7 +2175,11 @@ regatom(int *flagp)
 				  if (ret == NULL)
 				      ret = br;
 				  else
+				  {
 				      regtail(lastnode, br);
+				      if (reg_toolong)
+					  return NULL;
+				  }
 
 				  ungetchr();
 				  one_exactly = TRUE;
@@ -2193,6 +2204,8 @@ regatom(int *flagp)
 				      if (OP(br) == BRANCH)
 				      {
 					  regtail(br, lastbranch);
+					  if (reg_toolong)
+					      return NULL;
 					  br = OPERAND(br);
 				      }
 				      else
@@ -2221,7 +2234,7 @@ regatom(int *flagp)
 				  default:  i = -1; break;
 			      }
 
-			      if (i < 0)
+			      if (i < 0 || i > INT_MAX)
 				  EMSG2_RET_NULL(
 					_("E678: Invalid character after %s%%[dxouU]"),
 					reg_magic == MAGIC_ALL);
@@ -2545,6 +2558,21 @@ collection:
 			    case CLASS_ESCAPE:
 				regc('\033');
 				break;
+			    case CLASS_IDENT:
+				for (cu = 1; cu <= 255; cu++)
+				    if (vim_isIDc(cu))
+					regmbc(cu);
+				break;
+			    case CLASS_KEYWORD:
+				for (cu = 1; cu <= 255; cu++)
+				    if (reg_iswordc(cu))
+					regmbc(cu);
+				break;
+			    case CLASS_FNAME:
+				for (cu = 1; cu <= 255; cu++)
+				    if (vim_isfilec(cu))
+					regmbc(cu);
+				break;
 			}
 		    }
 		    else
@@ -2763,7 +2791,7 @@ reginsert_nr(int op, long val, char_u *opnd)
     *place++ = op;
     *place++ = NUL;
     *place++ = NUL;
-    place = re_put_long(place, (long_u)val);
+    re_put_long(place, (long_u)val);
 }
 
 /*
@@ -3271,7 +3299,7 @@ coll_get_char(void)
 	case 'u': nr = gethexchrs(4); break;
 	case 'U': nr = gethexchrs(8); break;
     }
-    if (nr < 0)
+    if (nr < 0 || nr > INT_MAX)
     {
 	/* If getting the number fails be backwards compatible: the character
 	 * is a backslash. */
@@ -3408,7 +3436,7 @@ static int	regmatch(char_u *prog, proftime_T *tm, int *timed_out);
 static int	regrepeat(char_u *p, long maxcount);
 
 #ifdef DEBUG
-int		regnarrate = 0;
+static int		regnarrate = 0;
 #endif
 
 /*
@@ -3523,14 +3551,14 @@ typedef enum regstate_E
  */
 typedef struct regitem_S
 {
-    regstate_T	rs_state;	/* what we are doing, one of RS_ above */
-    char_u	*rs_scan;	/* current node in program */
+    regstate_T	rs_state;	// what we are doing, one of RS_ above
+    short	rs_no;		// submatch nr or BEHIND/NOBEHIND
+    char_u	*rs_scan;	// current node in program
     union
     {
 	save_se_T  sesave;
 	regsave_T  regsave;
-    } rs_un;			/* room for saving rex.input */
-    short	rs_no;		/* submatch nr or BEHIND/NOBEHIND */
+    } rs_un;			// room for saving rex.input
 } regitem_T;
 
 static regitem_T *regstack_push(regstate_T state, char_u *scan);
@@ -3588,6 +3616,16 @@ free_regexp_stuff(void)
     vim_free(reg_prev_sub);
 }
 #endif
+
+/*
+ * Return TRUE if character 'c' is included in 'iskeyword' option for
+ * "reg_buf" buffer.
+ */
+    static int
+reg_iswordc(int c)
+{
+    return vim_iswordc_buf(c, rex.reg_buf);
+}
 
 /*
  * Get pointer to the line "lnum", which is relative to "reg_firstlnum".
@@ -3900,7 +3938,7 @@ make_extmatch(void)
 {
     reg_extmatch_T	*em;
 
-    em = (reg_extmatch_T *)alloc_clear((unsigned)sizeof(reg_extmatch_T));
+    em = ALLOC_CLEAR_ONE(reg_extmatch_T);
     if (em != NULL)
 	em->refcnt = 1;
     return em;
@@ -6425,7 +6463,7 @@ regdump(char_u *pattern, bt_regprog_T *r)
 	}
 	else if (op == RE_LNUM || op == RE_COL || op == RE_VCOL)
 	{
-	    /* one int plus comperator */
+	    /* one int plus comparator */
 	    fprintf(f, " count %ld", OPERAND_MIN(s));
 	    s += 5;
 	}
@@ -7113,7 +7151,7 @@ regtilde(char_u *source, int magic)
 	    {
 		/* length = len(newsub) - 1 + len(prev_sub) + 1 */
 		prevlen = (int)STRLEN(reg_prev_sub);
-		tmpsub = alloc((unsigned)(STRLEN(newsub) + prevlen));
+		tmpsub = alloc(STRLEN(newsub) + prevlen);
 		if (tmpsub != NULL)
 		{
 		    /* copy prefix */
@@ -7172,7 +7210,7 @@ typedef struct {
 static regsubmatch_T rsm;  /* can only be used when can_f_submatch is TRUE */
 #endif
 
-#if defined(FEAT_MODIFY_FNAME) || defined(FEAT_EVAL) || defined(PROTO)
+#ifdef FEAT_EVAL
 
 /*
  * Put the submatches in "argv[0]" which is a list passed into call_func() by
@@ -7216,6 +7254,7 @@ clear_submatch_list(staticList10_T *sl)
     for (i = 0; i < 10; ++i)
 	vim_free(sl->sl_items[i].li_tv.vval.v_string);
 }
+#endif
 
 /*
  * vim_regsub() - perform substitutions after a vim_regexec() or
@@ -7267,7 +7306,6 @@ vim_regsub(
 
     return result;
 }
-#endif
 
     int
 vim_regsub_multi(
@@ -7378,31 +7416,31 @@ vim_regsub_both(
 	    if (expr != NULL)
 	    {
 		typval_T	argv[2];
-		int		dummy;
 		char_u		buf[NUMBUFLEN];
 		typval_T	rettv;
 		staticList10_T	matchList;
+		funcexe_T	funcexe;
 
 		rettv.v_type = VAR_STRING;
 		rettv.vval.v_string = NULL;
 		argv[0].v_type = VAR_LIST;
 		argv[0].vval.v_list = &matchList.sl_list;
 		matchList.sl_list.lv_len = 0;
+		vim_memset(&funcexe, 0, sizeof(funcexe));
+		funcexe.argv_func = fill_submatch_list;
+		funcexe.evaluate = TRUE;
 		if (expr->v_type == VAR_FUNC)
 		{
 		    s = expr->vval.v_string;
-		    call_func(s, (int)STRLEN(s), &rettv,
-				    1, argv, fill_submatch_list,
-					 0L, 0L, &dummy, TRUE, NULL, NULL);
+		    call_func(s, -1, &rettv, 1, argv, &funcexe);
 		}
 		else if (expr->v_type == VAR_PARTIAL)
 		{
 		    partial_T   *partial = expr->vval.v_partial;
 
 		    s = partial_name(partial);
-		    call_func(s, (int)STRLEN(s), &rettv,
-				    1, argv, fill_submatch_list,
-				      0L, 0L, &dummy, TRUE, partial, NULL);
+		    funcexe.partial = partial;
+		    call_func(s, -1, &rettv, 1, argv, &funcexe);
 		}
 		if (matchList.sl_list.lv_len > 0)
 		    /* fill_submatch_list() was called */
@@ -7752,9 +7790,10 @@ reg_submatch(int no)
 	    if (lnum < 0 || rsm.sm_mmatch->endpos[no].lnum < 0)
 		return NULL;
 
-	    s = reg_getline_submatch(lnum) + rsm.sm_mmatch->startpos[no].col;
-	    if (s == NULL)  /* anti-crash check, cannot happen? */
+	    s = reg_getline_submatch(lnum);
+	    if (s == NULL)  // anti-crash check, cannot happen?
 		break;
+	    s += rsm.sm_mmatch->startpos[no].col;
 	    if (rsm.sm_mmatch->endpos[no].lnum == lnum)
 	    {
 		/* Within one line: take form start to end col. */
@@ -7797,7 +7836,7 @@ reg_submatch(int no)
 
 	    if (retval == NULL)
 	    {
-		retval = lalloc((long_u)len, TRUE);
+		retval = alloc(len);
 		if (retval == NULL)
 		    return NULL;
 	    }
@@ -7937,6 +7976,7 @@ vim_regcomp(char_u *expr_arg, int re_flags)
 {
     regprog_T   *prog = NULL;
     char_u	*expr = expr_arg;
+    int		save_called_emsg;
 
     regexp_engine = p_re;
 
@@ -7966,10 +8006,14 @@ vim_regcomp(char_u *expr_arg, int re_flags)
     bt_regengine.expr = expr;
     nfa_regengine.expr = expr;
 #endif
+    // reg_iswordc() uses rex.reg_buf
+    rex.reg_buf = curbuf;
 
     /*
      * First try the NFA engine, unless backtracking was requested.
      */
+    save_called_emsg = called_emsg;
+    called_emsg = FALSE;
     if (regexp_engine != BACKTRACKING_ENGINE)
 	prog = nfa_regengine.regcomp(expr,
 		re_flags + (regexp_engine == AUTOMATIC_ENGINE ? RE_AUTO : 0));
@@ -7998,13 +8042,15 @@ vim_regcomp(char_u *expr_arg, int re_flags)
 	 * If the NFA engine failed, try the backtracking engine.
 	 * The NFA engine also fails for patterns that it can't handle well
 	 * but are still valid patterns, thus a retry should work.
+	 * But don't try if an error message was given.
 	 */
-	if (regexp_engine == AUTOMATIC_ENGINE)
+	if (regexp_engine == AUTOMATIC_ENGINE && !called_emsg)
 	{
 	    regexp_engine = BACKTRACKING_ENGINE;
 	    prog = bt_regengine.regcomp(expr, re_flags);
 	}
     }
+    called_emsg |= save_called_emsg;
 
     if (prog != NULL)
     {
@@ -8160,8 +8206,6 @@ vim_regexec(regmatch_T *rmp, char_u *line, colnr_T col)
     return vim_regexec_string(rmp, line, col, FALSE);
 }
 
-#if defined(FEAT_MODIFY_FNAME) || defined(FEAT_EVAL) \
-	|| defined(FIND_REPLACE_DIALOG) || defined(PROTO)
 /*
  * Like vim_regexec(), but consider a "\n" in "line" to be a line break.
  * Note: "rmp->regprog" may be freed and changed.
@@ -8172,7 +8216,6 @@ vim_regexec_nl(regmatch_T *rmp, char_u *line, colnr_T col)
 {
     return vim_regexec_string(rmp, line, col, TRUE);
 }
-#endif
 
 /*
  * Match a regexp against multiple lines.
